@@ -1,0 +1,11 @@
+# interface and object files
+*.hi
+*.hi-boot
+*.o
+*.o-boot
+*.icurry
+.curry
+Curry_Main_Goal.curry
+
+# binaries
+src/CCTInstr
