@@ -3,17 +3,20 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version March 2017
+--- @version April 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
 import FlatCurry.Goodies
 import FlatCurry.Types
-import List              ((\\), find, intersect, nub)
+import List               ((\\), find, intersect, nub)
 
-import EnumEnv           (ConsNr, EnumEnv, lookupEnum)
+import CCTOptions         (CCTOpts (..))
+import EnumEnv            (EnumEnv, lookupEnum)
 import FlatCurryGoodies
 import Heap
+import Output             (traceDebug)
+import PrettyPrint hiding (combine)
 import Substitution
 import Symbolic
 import Utils
@@ -38,12 +41,14 @@ data Result a
   | Choice (Result a) (Result a)
 
 --- Internal state for concolic evaluation, consisting of
+---   * the current ccti options,
 ---   * the concrete heap containing variable bindings,
 ---   * a list of all defined function declarations,
 ---   * an index for fresh variables,
 ---   * a trace of symbolic information for case branches.
 data CEState = CEState
-  { cesHeap    :: Heap
+  { cesCCTOpts :: CCTOpts
+  , cesHeap    :: Heap
   , cesFuncs   :: [FuncDecl]
   , cesEnumEnv :: EnumEnv
   , cesFresh   :: VarIndex
@@ -51,14 +56,27 @@ data CEState = CEState
   }
 
 --- Initial state for concolic evaluation
-initState :: EnumEnv -> [FuncDecl] -> VarIndex -> CEState
-initState eenv fs v = CEState
-  { cesHeap    = emptyH
+initState :: CCTOpts -> EnumEnv -> [FuncDecl] -> VarIndex -> CEState
+initState opts eenv fs v = CEState
+  { cesCCTOpts = opts
+  , cesHeap    = emptyH
   , cesFuncs   = fs
   , cesEnumEnv = eenv
   , cesFresh   = v
   , cesTrace   = []
   }
+
+traceStep :: Expr -> CEM a -> CEM a
+traceStep e x = do
+  opts <- getOpts
+  h    <- getHeap
+  t    <- getTrace
+  traceDebug opts
+    (pPrint $ vsep [ text "Heap:"           <+> ppHeap h
+                   , text "Symbolic Trace:" <+> listSpaced (map pretty t)
+                   , text "Expression:"     <+> ppExp defaultOptions e
+                   ])
+    x
 
 --- Concolic evaluation monad
 data CEM a = CE { runCEM :: CEState -> Result (a, CEState) }
@@ -95,17 +113,19 @@ modify f = CE $ \s -> Return ((), f s)
 (<|>) :: CEM a -> CEM a -> CEM a
 (<|>) = choice
 
--- -----------------------------------------------------------------------------
--- Heap operations
--- -----------------------------------------------------------------------------
+--- ----------------------------------------------------------------------------
+
+--- Get the ccti options
+getOpts :: CEM CCTOpts
+getOpts = gets cesCCTOpts
+
+--- ----------------------------------------------------------------------------
+--- Heap operations
+--- ----------------------------------------------------------------------------
 
 --- Get the current heap
 getHeap :: CEM Heap
 getHeap = gets cesHeap
-
---- Get the current heap
-getHeap' :: CEM [(VarIndex, Binding)]
-getHeap' = gets (fmToList . cesHeap)
 
 --- Modify the current heap
 modifyHeap :: (Heap -> Heap) -> CEM ()
@@ -174,6 +194,10 @@ freshVars n = sequence $ replicate n freshVar
 
 --- ----------------------------------------------------------------------------
 
+--- Get the trace of symbolic information
+getTrace :: CEM Trace
+getTrace = gets cesTrace
+
 enum :: QName -> CEM ConsNr
 enum qn = do
   eenv <- gets cesEnumEnv
@@ -188,15 +212,15 @@ mkDecision cid info = modify (\s -> s { cesTrace = (cid :>: info) : cesTrace s }
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: EnumEnv -> [FuncDecl] -> Expr -> Expr
-ceval eenv fs e = fromResult $ runState (nf e) (initState eenv fs (-10))
+ceval :: CCTOpts -> EnumEnv -> [FuncDecl] -> Expr -> Expr
+ceval opts eenv fs e = fromResult $ runState (nf e) (initState opts eenv fs (-10))
 
 --- Evaluate
 -- eval :: [FuncDecl] -> Expr -> Expr
 -- eval fs e = fromResult $ runState (nf e) (initState fs (-1))
 
 fromResult :: Result (Expr, CEState) -> Expr
-fromResult (Return (e, s)) = trace (show (cesTrace s)) e
+fromResult (Return (e, _)) = e
 fromResult (Choice e1 e2)  = mkOr (fromResult e1) (fromResult e2)
 
 mkOr :: Expr -> Expr -> Expr
@@ -212,14 +236,15 @@ nf e = hnf e >>= \e' -> case e' of
 
 --- Evaluate given FlatCurry expression to head normal form
 hnf :: Expr -> CEM Expr
-hnf (Var        v) = getHeap' >>= \h -> trace ("Var: " ++ show h) (return ()) >> hnfVar  v
-hnf (Lit        l) = getHeap' >>= \h -> trace ("Lit: " ++ show h) (return ()) >> hnfLit  l
-hnf (Comb ct f es) = getHeap' >>= \h -> trace ("Comb: " ++ show h) (return ()) >> hnfComb ct f es
-hnf (Let     bs e) = getHeap' >>= \h -> trace ("Let: " ++ show h) (return ()) >> hnfLet  bs e
-hnf (Free    vs e) = getHeap' >>= \h -> trace ("Free: " ++ show h) (return ()) >> hnfFree vs e
-hnf (Or     e1 e2) = getHeap' >>= \h -> trace ("Or: " ++ show h) (return ()) >> hnfOr   e1 e2
-hnf (Case ct e bs) = getHeap' >>= \h -> trace ("Case: " ++ show h) (return ()) >> hnfCase ct e bs
-hnf (Typed    e _) = getHeap' >>= \h -> trace ("Typed: " ++ show h) (return ()) >> hnf     e
+hnf exp = case exp of
+  Var        v -> traceStep exp $ hnfVar  v
+  Lit        l -> traceStep exp $ hnfLit  l
+  Comb ct f es -> traceStep exp $ hnfComb ct f es
+  Let     bs e -> traceStep exp $ hnfLet  bs e
+  Free    vs e -> traceStep exp $ hnfFree vs e
+  Or     e1 e2 -> traceStep exp $ hnfOr   e1 e2
+  Case ct e bs -> traceStep exp $ hnfCase ct e bs
+  Typed    e _ -> traceStep exp $ hnf     e
 
 --- Concolic evaluation of a variable
 hnfVar :: VarIndex -> CEM Expr
@@ -261,7 +286,7 @@ hnfComb ct f es = case ct of
   FuncCall
     | all isVar es -> lookupRule f >>= \mrule -> case mrule of
       Nothing      -> ceBuiltin f es
-      Just (xs, e) -> trace ((show f) ++ " " ++ show xs ++ " = " ++ show e) $ hnf (subst (mkSubst xs es) e)
+      Just (xs, e) -> {-trace ((show f) ++ " " ++ show xs ++ " = " ++ show e) $-} hnf (subst (mkSubst xs es) e)
     | otherwise    -> mvs >>= \vs -> hnf (Comb ct f vs)
   _                -> Comb ct f <$> mvs
  where
@@ -306,8 +331,8 @@ hnfCase ct e bs = do
     Comb ConsCall c es -> case findBranch (Pattern c []) bs of
       Nothing          -> failS
       Just (n, vs, be) -> do
-        conNr <- enum c
-        mkDecision cid (SymInfo (n, length bs) vi conNr (concatMap getVarIdx es))
+        cnr <- enum c
+        mkDecision cid (SymInfo (n :/: length bs) vi cnr (concatMap getVarIdx es))
         hnf (subst (mkSubst vs es) be)
     Comb FuncCall _ _
       | v == failedExpr -> failS

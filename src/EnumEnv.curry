@@ -1,11 +1,12 @@
 module EnumEnv where
 
+import FlatCurry.Pretty (defaultOptions, ppQName)
 import FlatCurry.Types
 import FiniteMap
 
+import PrettyPrint
+import Symbolic         (ConsNr, NthOfM (..))
 import Utils
-
-type ConsNr = (Int, Int)
 
 type EnumEnv = FM QName ConsNr
 
@@ -37,4 +38,15 @@ enumType (Type   _ _ _ cs) = zipWithM_ (enumCons (length cs)) [1 ..] cs
 enumType (TypeSyn _ _ _ _) = return ()
 
 enumCons :: Int -> Int -> ConsDecl -> Enum ()
-enumCons s nr (Cons qn _ _ _) = insertEnum qn (nr, s)
+enumCons s nr (Cons qn _ _ _) = insertEnum qn (nr :/: s)
+
+--- Pretty printing
+
+ppEEnv :: EnumEnv -> Doc
+ppEEnv eenv = ppEEnv' $ fmToList eenv
+  where
+  ppEEnv' []        = text "[]"
+  ppEEnv' env@(_:_) = listSpaced $ map ppEnum env
+    where ppEnum (qn, cnr) = ppQName defaultOptions qn
+                          <+> char '\x21a6'
+                          <+> pretty cnr

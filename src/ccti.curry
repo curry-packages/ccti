@@ -1,7 +1,7 @@
 module ccti (main) where
 
 import Distribution     ( FrontendTarget (FCY), callFrontendWithParams, fullPath
-                        , rcParams, setFullPath
+                        , rcParams, setFullPath, sysLibPath
                         )
 import FlatCurry.Files  (readFlatCurry)
 import FlatCurry.Types
@@ -9,9 +9,9 @@ import List             (nub)
 import Maybe            (fromMaybe)
 import System           (exitWith, getProgName)
 
-import CCTOptions       (Options (..), badUsage, getOpts)
+import CCTOptions       (CCTOpts (..), badUsage, getOpts)
 import EnumEnv          (enumerate)
-import Eval
+import Eval             (ceval)
 import FlatCurryGoodies (fcall, hasMain, printExpr)
 import IdentifyCases    (idCases, ICState (..))
 import Output           (status)
@@ -21,8 +21,7 @@ main = do
   (opts, files) <- getOpts
   exec          <- getProgName
   params        <- rcParams
-  let path    = fromMaybe [] (fullPath params)
-      params' = setFullPath (nub (path ++ optImportPaths opts)) params
+  let params' = setFullPath (nub (sysLibPath ++ optImportPaths opts)) params
   status opts "Generating FlatCurry code"
   callFrontendWithParams FCY params' (head files)
   status opts "Reading FlatCurry file(s)"
@@ -31,7 +30,7 @@ main = do
     then badUsage exec ["There is no main function in the given Curry file"]
     else do (ts, fs) <- getAllFuncs m
             status opts "Evaluating normal form of main"
-            printExpr $ ceval (enumerate ts) (idCases fs) (fcall (m, "main") [])
+            printExpr $ ceval opts (enumerate ts) (idCases fs) (fcall (m, "main") [])
 
 -- TODO: nicht transformierte Funktionen des Main Moduls werden verwendet,
 -- Aufruf von getAllFuncs anpassen

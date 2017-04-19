@@ -5,7 +5,7 @@
 --- @version April 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
-  (Options (..), Verbosity (..), badUsage, defOptions, getOpts) where
+  (CCTOpts (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
 
 import FilePath (splitSearchPath)
 import GetOpt   ( OptDescr (..), ArgOrder (Permute), ArgDescr (..), getOpt
@@ -17,7 +17,7 @@ import System   (exitWith, getArgs, getProgName)
 
 import Utils    (rpad)
 
-data Options = Options
+data CCTOpts = CCTOpts
   { optHelp        :: Bool
   , optVersion     :: Bool
   , optImportPaths :: [String]
@@ -25,8 +25,8 @@ data Options = Options
   }
 
 --- default options
-defOptions :: Options
-defOptions = Options
+defCCTOpts :: CCTOpts
+defCCTOpts = CCTOpts
   { optHelp        = False
   , optVersion     = False
   , optImportPaths = []
@@ -52,7 +52,7 @@ version = unlines [ "Curry Concolic Testing Interpreter"
                   ]
 
 --- Description of the available options
-options :: [OptDescr (OptErr Options -> OptErr Options)]
+options :: [OptDescr (OptErr CCTOpts -> OptErr CCTOpts)]
 options =
   [ Option ['h', '?'] ["help"]
       (NoArg (onOpts $ \opts -> opts { optHelp = True }))
@@ -68,7 +68,7 @@ options =
   ]
 
 --- Verbosity descriptions
-verbDescriptions :: OptTable Options
+verbDescriptions :: OptTable CCTOpts
 verbDescriptions = map toDescr verbosities
   where
   toDescr (flag, name, desc) = (name, desc, set flag)
@@ -78,22 +78,22 @@ verbDescriptions = map toDescr verbosities
 ---  * the @--help@ option was not specified
 ---  * the @--version@ option was not specified
 ---  * there were no errors in the specified options.
-getOpts :: IO (Options, [String])
+getOpts :: IO (CCTOpts, [String])
 getOpts = do
   args <- getArgs
   prog <- getProgName
   processOpts prog $ parseOpts args
 
 --- Parse the options specified on the command line.
-parseOpts :: [String] -> (Options, [String], [String])
+parseOpts :: [String] -> (CCTOpts, [String], [String])
 parseOpts args = (opts, files, errs ++ argErrs)
   where
-    (opts, argErrs)        = foldl (flip ($)) (defOptions, []) optErrs
+    (opts, argErrs)        = foldl (flip ($)) (defCCTOpts, []) optErrs
     (optErrs, files, errs) = getOpt Permute options args
 
 --- Process the parsed options.
-processOpts :: String -> (Options, [String], [String])
-            -> IO (Options, [String])
+processOpts :: String -> (CCTOpts, [String], [String])
+            -> IO (CCTOpts, [String])
 processOpts prog (opts, files, errs)
   | optHelp    opts  = printUsage prog
   | optVersion opts  = printVersion
@@ -102,7 +102,7 @@ processOpts prog (opts, files, errs)
   where errs' = errs ++ checkOpts opts files
 
 --- Check the specified options for errors.
-checkOpts :: Options -> [String] -> [String]
+checkOpts :: CCTOpts -> [String] -> [String]
 checkOpts _ []    = ["no files"]
 checkOpts _ (_:_) = []
 

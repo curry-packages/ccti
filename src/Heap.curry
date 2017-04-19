@@ -3,12 +3,15 @@
 --- to markers for free variables or black holes, or the expressions.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version March 2017
+--- @version April 2017
 --- ----------------------------------------------------------------------------
 module Heap where
 
 import FiniteMap
+-- import FlatCurry.Pretty (defaultOptions, ppExp, ppVarIndex)
 import FlatCurry.Types
+
+import PrettyPrint
 
 --- A 'Binding' represents the value of a variable bound in the heap.
 --- @cons BlackHole   - the variable is a black hole, such as in `let x = x in x`
@@ -70,9 +73,20 @@ bindLazyFree v = bindH v LazyFree
 unbind :: VarIndex -> Heap -> Heap
 unbind = flip delFromFM
 
+--- Pretty printing
 
+instance Pretty Binding where
+  pretty BlackHole     = text "\x25a0"
+  pretty (BoundVar  e) = ppExp defaultOptions e
+  pretty (LazyBound e) = text "~" <> ppExp defaultOptions e
+  pretty FreeVar       = text "free"
+  pretty LazyFree      = text "~free"
 
-
-
+ppHeap :: Heap -> Doc
+ppHeap h = ppHeap' $ fmToList h
+  where
+  ppHeap' []     = text "[]"
+  ppHeap' heap@(_:_) = listSpaced $ map ppBinding heap
+    where ppBinding (i, b) = ppVarIndex i <+> char '\x21a6' <+> pretty b
 
 

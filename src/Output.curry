@@ -8,19 +8,19 @@ module Output where
 
 import Unsafe (unsafePerformIO)
 
-import CCTOptions (Options (..), Verbosity (..))
+import CCTOptions (CCTOpts (..), Verbosity (..))
 
-traceDebug :: Options -> String -> a -> a
+traceDebug :: CCTOpts -> String -> a -> a
 traceDebug opts msg x = unsafePerformIO (debug opts msg >> return x)
 
 --- Print status information
-status :: Options -> String -> IO ()
+status :: CCTOpts -> String -> IO ()
 status opts msg = when (optVerbosity opts >= Status) (putStrLn msg)
 
 --- Print additional information
-info :: Options -> String -> IO ()
+info :: CCTOpts -> String -> IO ()
 info opts msg = when (optVerbosity opts >= Info) (putStrLn msg)
 
 --- Print debug information
-debug :: Options -> String -> IO ()
+debug :: CCTOpts -> String -> IO ()
 debug opts msg = when (optVerbosity opts >= Debug) (putStrLn msg)
