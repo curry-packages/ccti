@@ -15,7 +15,7 @@ import CCTOptions         (CCTOpts (..))
 import EnumEnv            (EnumEnv, lookupEnum)
 import FlatCurryGoodies
 import Heap
-import Output             (traceDebug)
+import Output             (traceDebug, traceInfo)
 import PrettyPrint hiding (combine)
 import Substitution
 import Symbolic
@@ -66,6 +66,7 @@ initState opts eenv fs v = CEState
   , cesTrace   = []
   }
 
+--- Trace a single evaluation step
 traceStep :: Expr -> CEM a -> CEM a
 traceStep e x = do
   opts <- getOpts
@@ -77,6 +78,10 @@ traceStep e x = do
                    , text "Expression:"     <+> ppExp defaultOptions e
                    ])
     x
+
+traceSym :: CEState -> a -> a
+traceSym s = traceInfo (cesCCTOpts s)
+  (pPrint $ text "Symbolic Trace:" <+> listSpaced (map pretty (reverse (cesTrace s))))
 
 --- Concolic evaluation monad
 data CEM a = CE { runCEM :: CEState -> Result (a, CEState) }
@@ -212,15 +217,17 @@ mkDecision cid info = modify (\s -> s { cesTrace = (cid :>: info) : cesTrace s }
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: CCTOpts -> EnumEnv -> [FuncDecl] -> Expr -> Expr
-ceval opts eenv fs e = fromResult $ runState (nf e) (initState opts eenv fs (-10))
+ceval :: CCTOpts -> EnumEnv -> [FuncDecl] -> VarIndex -> Expr -> Expr
+ceval opts eenv fs v e = fromResult $ runState (nf e) (initState opts eenv fs v)
 
 --- Evaluate
 -- eval :: [FuncDecl] -> Expr -> Expr
 -- eval fs e = fromResult $ runState (nf e) (initState fs (-1))
 
 fromResult :: Result (Expr, CEState) -> Expr
-fromResult (Return (e, _)) = e
+fromResult (Return (e, s))
+  | e == failedExpr = e
+  | otherwise       = traceSym s e
 fromResult (Choice e1 e2)  = mkOr (fromResult e1) (fromResult e2)
 
 mkOr :: Expr -> Expr -> Expr
@@ -294,7 +301,10 @@ hnfComb ct f es = case ct of
 
 --- Concolic evaluation of a let expression
 hnfLet :: [(VarIndex, Expr)] -> Expr -> CEM Expr
-hnfLet bs e = addBindings bs e >>= hnf
+hnfLet bs e = case bs of
+  [(i, e')]                               -- let binding with case id: do not introduce a fresh variable!
+    | i < 0 -> bindE i e'       >>  hnf e
+  _         -> addBindings bs e >>= hnf
 
 --- Add a list of local bindings to the heap
 addBindings :: [(VarIndex, Expr)] -> Expr -> CEM Expr
@@ -332,7 +342,7 @@ hnfCase ct e bs = do
       Nothing          -> failS
       Just (n, vs, be) -> do
         cnr <- enum c
-        mkDecision cid (SymInfo (n :/: length bs) vi cnr (concatMap getVarIdx es))
+        mkDecision cid (SymInfo (n :/: bcnt) vi cnr (concatMap getVarIdx es))
         hnf (subst (mkSubst vs es) be)
     Comb FuncCall _ _
       | v == failedExpr -> failS
@@ -340,15 +350,19 @@ hnfCase ct e bs = do
       | ct == Rigid -> error "Suspended"
       | otherwise   -> narrowCase
       where
-        narrowCase = foldr choice failS $ map guess bs
+        narrowCase = foldr choice failS $ zipWith guess [1 ..] bs
 
-        guess (Branch (LPattern   l) be) = bindE i (Lit l) >> hnf be
-        guess (Branch (Pattern c xs) be) = do
-          ys <- freshVars (length xs)
+        guess n (Branch (LPattern   l) be) = bindE i (Lit l) >> hnf be
+        guess n (Branch (Pattern c xs) be) = do
+          ys  <- freshVars (length xs)
+          cnr <- enum c
+          mkDecision cid (SymInfo (n :/: bcnt) vi cnr ys)
           let es' = map Var ys
           bindE i (Comb ConsCall c es')
           hnf (subst (mkSubst xs es') be)
     _ -> error $ "Eval.hnfCase: " ++ show v
+ where
+  bcnt = length bs
 
 --- Remove the case identifier from the scrutinized expression of a case expression
 rmvCaseID :: Expr -> CEM (VarIndex, Expr)

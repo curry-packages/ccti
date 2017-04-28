@@ -13,6 +13,9 @@ import CCTOptions (CCTOpts (..), Verbosity (..))
 traceDebug :: CCTOpts -> String -> a -> a
 traceDebug opts msg x = unsafePerformIO (debug opts msg >> return x)
 
+traceInfo :: CCTOpts -> String -> a -> a
+traceInfo opts msg x = unsafePerformIO (info opts msg >> return x)
+
 --- Print status information
 status :: CCTOpts -> String -> IO ()
 status opts msg = when (optVerbosity opts >= Status) (putStrLn msg)

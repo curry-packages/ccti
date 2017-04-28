@@ -22,6 +22,7 @@ data CCTOpts = CCTOpts
   , optVersion     :: Bool
   , optImportPaths :: [String]
   , optVerbosity   :: Verbosity
+  , optSearchDepth :: Int
   }
 
 --- default options
@@ -31,6 +32,7 @@ defCCTOpts = CCTOpts
   , optVersion     = False
   , optImportPaths = []
   , optVerbosity   = Status
+  , optSearchDepth = 10
   }
 
 --- Verbosity level
@@ -65,6 +67,9 @@ options =
         ((optImportPaths opts) ++ splitSearchPath arg) }) "dir[:dir]")
       "search for imports in `dir[:dir]'"
   , mkOption ['v'] ["verbosity"] verbDescriptions "n" "verbosity level"
+  , Option ['d'] ["search-depth"]
+      (ReqArg (onOptsArg $ \arg opts -> opts { optSearchDepth = read arg }) "n")
+      "maximal search depth"
   ]
 
 --- Verbosity descriptions

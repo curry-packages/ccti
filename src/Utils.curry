@@ -31,3 +31,7 @@ a <*> b = a >>= \f -> b >>= \x -> return (f x)
 --- Pad a string to a specific length with space from the right side.
 rpad :: Int -> String -> String
 rpad n str = str ++ replicate (n - length str) ' '
+
+--- swap the components of a tuple
+swap :: (a, b) -> (b, a)
+swap (x, y) = (y, x)

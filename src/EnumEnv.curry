@@ -1,3 +1,17 @@
+--- ----------------------------------------------------------------------------
+--- This module provides an environment for the enumeration of value
+--- constructors.
+--- For a type declaration like
+---
+---   data Bool = False | True
+---
+--- the following entries are added to the enumeration environment
+---
+---   [(False, (1,2)), (True, (2,2))]
+---
+--- @author  Jan Tikovsky
+--- @version April 2017
+--- ----------------------------------------------------------------------------
 module EnumEnv where
 
 import FlatCurry.Pretty (defaultOptions, ppQName)
@@ -38,7 +52,9 @@ enumType (Type   _ _ _ cs) = zipWithM_ (enumCons (length cs)) [1 ..] cs
 enumType (TypeSyn _ _ _ _) = return ()
 
 enumCons :: Int -> Int -> ConsDecl -> Enum ()
-enumCons s nr (Cons qn _ _ _) = insertEnum qn (nr :/: s)
+enumCons s nr (Cons qn _ _ _)
+  | head (snd qn) == '_' = return ()                -- ignore dictionaries
+  | otherwise            = insertEnum qn (nr :/: s)
 
 --- Pretty printing
 
