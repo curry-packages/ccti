@@ -65,8 +65,6 @@ data Term = TConst SpecConstant
           | Annot Term [Attribute]
   deriving (Eq, Show)
 
--- TODO: continue here
-
 --- Theories
 
 data SortSymDecl = SortSymDecl Ident Numeral [Attribute]
