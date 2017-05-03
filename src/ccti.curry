@@ -12,10 +12,17 @@ import System           (exitWith, getProgName)
 import CCTOptions       (CCTOpts (..), badUsage, getOpts)
 import EnumEnv          (enumerate, ppEEnv)
 import Eval             (ceval)
+import FCY2SMTLib       (fcy2SMT, SMTState (..))
 import FlatCurryGoodies (fcall, hasMain, printExpr)
 import IdentifyCases    (idCases)
 import Output           (info, status)
 import PrettyPrint
+
+--- remove
+import qualified SMTLib.Types as SMT
+import SMTLib.Pretty
+import Debug (trace)
+
 
 main :: IO ()
 main = do
@@ -34,6 +41,9 @@ main = do
       status opts "Evaluating normal form of main"
       let eenv     = enumerate ts
           (fs', v) = idCases fs
+          -- todo: remove
+          smtstate = SMT.SMTLib $ smtDecls $ fcy2SMT ts
+      trace (pPrint $ pretty smtstate) $ return ()
       info opts (pPrint $ text "Enumeration environment:" <+> ppEEnv eenv)
       info opts (pPrint $ text "Functions:" <+> ppFuncDecls defaultOptions (filter (isLocal m) fs'))
       printExpr $ ceval opts eenv fs' v (fcall (m, "main") [])

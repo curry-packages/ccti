@@ -35,7 +35,7 @@ data SExpr = SEConst SpecConstant
 --- Sorts
 
 data Sort = SComb Ident [Sort]
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 --- Attributes
 

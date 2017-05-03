@@ -40,7 +40,7 @@ instance Pretty SymInfo where
                    , list (map ppVarIndex vs)
                    ]
 
-type PathConstr = (BranchNr, VarIndex, ConsNr)
+-- type PathConstr = (BranchNr, VarIndex, ConsNr)
 
 type Queue a = [a]
 
