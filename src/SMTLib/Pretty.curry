@@ -1,4 +1,4 @@
-module SMTLib.Pretty (module PrettyPrint, module SMTLib.Pretty) where
+module SMTLib.Pretty where
 
 import SMTLib.Types
 import PrettyPrint

@@ -4,12 +4,12 @@
 --- @author  Jan Tikovsky
 --- @version April 2017
 --- ----------------------------------------------------------------------------
-module PrettyPrint ( module FlatCurry.Pretty
+module PrettyPrint ( module FlatCurry.Annotated.Pretty
                    , module Pretty
                    , module PrettyPrint) where
 
-import FlatCurry.Pretty hiding (indent)
-import Pretty           hiding (pretty)
+import FlatCurry.Annotated.Pretty hiding (indent)
+import Pretty                     hiding (pretty)
 
 class Pretty a where
   pretty :: a -> Doc

@@ -1,70 +1,96 @@
 module FlatCurryGoodies where
 
-import FlatCurry.Goodies
-import FlatCurry.Pretty  (ppExp, defaultOptions)
-import FlatCurry.Types
-import Pretty            (pPrint)
+import FlatCurry.Annotated.Goodies
+import FlatCurry.Annotated.Pretty  (ppExp)
+import FlatCurry.Annotated.Types
+import Pretty                      (pPrint)
 
-hasName :: QName -> FuncDecl -> Bool
+hasName :: QName -> AFuncDecl a -> Bool
 hasName qn f = qn == funcName f
 
 --- Qualification of Prelude functions
 prel :: String -> QName
 prel f = ("Prelude", f)
 
---- FlatCurry expression representing `failed`
-failedExpr :: Expr
-failedExpr = Comb FuncCall (prel "failed") []
+--- Annotated FlatCurry expression representing `failed`
+failedExpr :: AExpr TypeExpr
+failedExpr = AComb (TVar 0) FuncCall ((prel "failed"), TVar 0) []
 
---- FlatCurry expression representing `True`
-trueExpr :: Expr
-trueExpr = Comb ConsCall (prel "True") []
+--- Annotated FlatCurry type expression representing `Bool`
+boolType :: TypeExpr
+boolType = TCons (prel "Bool") []
 
---- FlatCurry expression representing `False`
-falseExpr :: Expr
-falseExpr = Comb ConsCall (prel "False") []
+--- Annotated FlatCurry type expression representing `Int`
+intType :: TypeExpr
+intType = TCons (prel "Int") []
 
---- FlatCurry expression representing `[]`
-nil :: Expr
-nil = Comb ConsCall (prel "[]") []
+--- Annotated FlatCurry type expression representing `Char`
+charType :: TypeExpr
+charType = TCons (prel "Char") []
 
---- FlatCurry expression representing `:`
-cons :: [Expr] -> Expr
-cons = Comb ConsCall (prel ":")
+--- Annotated FlatCurry type expression representing `Float`
+floatType :: TypeExpr
+floatType = TCons (prel "Float") []
+
+--- Annotated FlatCurry expression representing `True`
+trueExpr :: AExpr TypeExpr
+trueExpr = AComb boolType ConsCall (prel "True", boolType) []
+
+--- Annotated FlatCurry expression representing `False`
+falseExpr :: AExpr TypeExpr
+falseExpr = AComb boolType ConsCall (prel "False", boolType) []
+
+--- Annotated FlatCurry type constructor for lists
+listType :: TypeExpr -> TypeExpr
+listType ty = TCons (prel "[]") [ty]
+
+--- Annotated FlatCurry type constructor for tuples
+tplType :: [TypeExpr] -> TypeExpr
+tplType tys = TCons (prel "(,)") tys
+
+--- Annotated FlatCurry expression representing `[]`
+nil :: AExpr TypeExpr
+nil = AComb ty  ConsCall (prel "[]", ty) []
+  where ty = listType (TVar 0)
+
+--- Annotated FlatCurry expression representing `:`
+cons :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
+cons ty = AComb lty ConsCall ((prel ":"), lty)
+  where lty = listType ty
 
 --- FlatCurry expression representing `(,)`
-tpl :: [Expr] -> Expr
-tpl = Comb ConsCall (prel "(,)")
+tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
+tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
 
 --- Select the pattern variables of a given pattern
-patVars :: Pattern -> [VarIndex]
-patVars (Pattern _ vs) = vs
-patVars (LPattern   _) = []
+patVars :: APattern a -> [(VarIndex, a)]
+patVars (APattern _ _ vs) = vs
+patVars (ALPattern   _ _) = []
 
 --- Get the variable index of a FlatCurry expression
-getVarIdx :: Expr -> [VarIndex]
+getVarIdx :: AExpr a -> [VarIndex]
 getVarIdx e = case e of
-  Var i -> [i]
-  _     -> []
+  AVar _ i -> [i]
+  _        -> []
 
 --- Check if two pattern are equal
-eqPattern :: Pattern -> Pattern -> Bool
+eqPattern :: APattern a -> APattern a -> Bool
 eqPattern p q = case (p, q) of
-  (Pattern c1 _, Pattern c2 _) -> c1 == c2
-  (LPattern  l1, LPattern  l2) -> l1 == l2
-  _                            -> False
+  (APattern _ (c1, _) _, APattern _ (c2, _) _) -> c1 == c2
+  (ALPattern       _ l1, ALPattern       _ l2) -> l1 == l2
+  _                                            -> False
 
 --- Find the matching branch for a given pattern
-findBranch :: Pattern -> [BranchExpr] -> Maybe (Int, [VarIndex], Expr)
+findBranch :: APattern a -> [ABranchExpr a] -> Maybe (Int, [(VarIndex, a)], AExpr a)
 findBranch = findBranch' 1
   where
-  findBranch' i _ []                                = Nothing
-  findBranch' i p (Branch q e : bs) | eqPattern p q = Just (i, patVars q, e)
-                                    | otherwise     = findBranch' (i+1) p bs
+  findBranch' _ _ []                                 = Nothing
+  findBranch' i p (ABranch q e : bs) | eqPattern p q = Just (i, patVars q, e)
+                                     | otherwise     = findBranch' (i+1) p bs
 
 --- Add an argument to a partial call
-addPartCallArg :: CombType -> QName -> [Expr] -> Expr -> Expr
-addPartCallArg ct qn es e = Comb ct' qn (es ++ [e])
+addPartCallArg :: a -> CombType -> (QName, a) -> [AExpr a] -> AExpr a -> AExpr a
+addPartCallArg ann ct qn es e = AComb ann ct' qn (es ++ [e])
   where ct' = case ct of
                 ConsPartCall 1 -> ConsCall
                 ConsPartCall n -> ConsPartCall (n - 1)
@@ -79,85 +105,78 @@ isPartCall ct = case ct of
   FuncPartCall _ -> True
   _              -> False
 
-combine :: QName -> QName -> Expr -> [Expr] -> [Expr] -> Expr
-combine amp uni def es1 es2
-  | null eqs = def
-  | otherwise = foldr1 (mkCall amp) eqs
+combine :: (QName, a) -> (QName, a) -> AExpr a -> [AExpr a] -> [AExpr a] -> AExpr a
+combine (amp, an1) (uni, an2) def es1 es2
+  | null eqs  = def
+  | otherwise = foldr1 (mkCall an1 amp) eqs
   where
-  eqs = zipWith (mkCall uni) es1 es2
-  mkCall qn e1 e2 = Comb FuncCall qn [e1, e2]
+  eqs = zipWith (mkCall an2 uni) es1 es2
+  mkCall ann qn e1 e2 = AComb ann FuncCall (qn, ann) [e1, e2]
 
 --- Check whether the given FlatCurry program includes a main function
-hasMain :: Prog -> Bool
-hasMain (Prog m _ _ fs _) = any (hasName (m, "main")) fs
+hasMain :: AProg a -> Bool
+hasMain (AProg m _ _ fs _) = any (hasName (m, "main")) fs
 
---- Generate a call for a FlatCurry function
-fcall :: QName -> [Expr] -> Expr
-fcall = Comb FuncCall
+--- Generate a call for an annotated FlatCurry function
+fcall :: TypeExpr -> QName -> [AExpr TypeExpr] -> AExpr TypeExpr
+fcall ty qn = AComb ty FuncCall (qn, ty)
 
 --- Conversion of Curry types into their FlatCurry representation
 class ToFCY a where
-  toFCY   :: a    -> Expr
-  fromFCY :: Expr -> a
+  toFCY   :: a    -> AExpr TypeExpr
+  fromFCY :: AExpr TypeExpr -> a
 
 instance ToFCY Bool where
   toFCY False = falseExpr
   toFCY True  = trueExpr
 
   fromFCY e = case e of
-    Comb ConsCall ("Prelude", "False") [] -> False
-    Comb ConsCall ("Prelude",  "True") [] -> True
-    _                                     -> error "fromFCY: no boolean"
+    AComb _ ConsCall (("Prelude", "False"), _) [] -> False
+    AComb _ ConsCall (("Prelude",  "True"), _) [] -> True
+    _                                             -> error "fromFCY: no boolean"
 
 instance ToFCY Int where
-  toFCY = Lit . Intc
+  toFCY = ALit intType . Intc
 
   fromFCY e = case e of
-    Lit (Intc x) -> x
-    _            -> error "fromFCY: no integer"
+    ALit _ (Intc x) -> x
+    _               -> error "fromFCY: no integer"
 
 instance ToFCY Char where
-  toFCY = Lit . Charc
+  toFCY = ALit charType . Charc
 
   fromFCY e = case e of
-    Lit (Charc c) -> c
-    _             -> error "fromFCY: no character"
+    ALit _ (Charc c) -> c
+    _                -> error "fromFCY: no character"
 
 instance ToFCY Float where
-  toFCY = Lit . Floatc
+  toFCY = ALit floatType . Floatc
 
   fromFCY e = case e of
-    Lit (Floatc f) -> f
-    _              -> error "fromFCY: no float"
+    ALit _ (Floatc f) -> f
+    _                 -> error "fromFCY: no float"
 
 instance ToFCY a => ToFCY [a] where
   toFCY []     = nil
-  toFCY (x:xs) = cons [toFCY x, toFCY xs]
+  toFCY (x:xs) = cons ty [x', toFCY xs]
+    where x' = toFCY x
+          ty = annExpr x'
 
   fromFCY e = case e of
-    Comb ConsCall ("Prelude", "[]") []       -> []
-    Comb ConsCall ("Prelude",  ":") [e1, e2] -> fromFCY e1 : fromFCY e2
-    _                                        -> error "fromFCY: no list"
+    AComb _ ConsCall (("Prelude", "[]"), _) []       -> []
+    AComb _ ConsCall (("Prelude",  ":"), _) [e1, e2] -> fromFCY e1 : fromFCY e2
+    _                                                -> error "fromFCY: no list"
 
 instance (ToFCY a, ToFCY b) => ToFCY (a, b) where
-  toFCY (x, y) = tpl [toFCY x, toFCY y]
+  toFCY (x, y) = tpl tty [x', y']
+    where x'  = toFCY x
+          y'  = toFCY y
+          tty = tplType [annExpr x', annExpr y']
 
   fromFCY e = case e of
-    Comb ConsCall ("Prelude", "(,)") [e1, e2] -> (fromFCY e1, fromFCY e2)
-    _                                         -> error $ "fromFCY: no tuple: " ++ show e
-
--- --- Conversion of FlatCurry types into their Curry representation
--- fromFCYList :: (Expr -> a) -> Expr -> [a]
--- fromFCYList f xs = case xs of
---   Comb ConsCall ("Prelude", "[]") []      -> []
---   Comb ConsCall ("Prelude",  ":") [e1,e2] -> f e1 : fromFCYList f e2
---   _                                       -> error $ "FlatCurryGoodies.fromFCYList: " ++ show xs
---
--- fromFCYChar :: Expr -> Char
--- fromFCYChar e = case e of
---   Lit (Charc c) -> c
---   _             -> error $ "FlatCurryGoodies.fromFCYChar: " ++ show e
+    AComb _ ConsCall (("Prelude", "(,)"), _) [e1, e2] -> (fromFCY e1, fromFCY e2)
+    _                                                 -> error $ "fromFCY: no tuple: " ++ show e
 
 --- Pretty print a FlatCurry expression
-printExpr :: Expr -> IO ()
-printExpr = putStrLn . pPrint . ppExp defaultOptions
+printExpr :: AExpr TypeExpr -> IO ()
+printExpr = putStrLn . pPrint . ppExp

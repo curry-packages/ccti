@@ -12,12 +12,13 @@
 ---     where cid is a fresh identifier
 ---
 --- @author  Jan Tikovsky
---- @version April 2017
+--- @version May 2017
 --- ----------------------------------------------------------------------------
 module IdentifyCases where
 
 import FiniteMap
-import FlatCurry.Types
+import FlatCurry.Annotated.Types
+import FlatCurry.Annotated.Goodies (annExpr)
 
 import Utils
 
@@ -40,50 +41,29 @@ freshID = do
   put (v - 1)
   return v
 
--- TODO: remove
--- freshIDs :: Int -> ICM [VarIndex]
--- freshIDs n = sequence $ replicate n freshID
-
 --- Add a unique identifier to all expressions which are scrutinized in cases
-idCases :: [FuncDecl] -> ([FuncDecl], VarIndex)
+idCases :: [AFuncDecl a] -> ([AFuncDecl a], VarIndex)
 idCases fs = (runICM (mapM icFunc fs)) (-1)
 
--- icProg :: Prog -> ICM Prog
--- icProg (Prog m is ts fs os) = do
---   fs' <- mapM icFunc fs
---   return (Prog m is ts fs' os)
+icFunc :: AFuncDecl a -> ICM (AFuncDecl a)
+icFunc (AFunc qn a vis ty r) = AFunc qn a vis ty <$> icRule r
 
-icFunc :: FuncDecl -> ICM FuncDecl
-icFunc (Func qn a vis ty r) = Func qn a vis ty <$> icRule r
+icRule :: ARule a -> ICM (ARule a)
+icRule (ARule  ann vs e) = ARule ann vs <$> icExpr e
+icRule e@(AExternal _ _) = return e
 
-icRule :: Rule -> ICM Rule
-icRule (Rule    vs e) = Rule vs <$> icExpr e
-icRule e@(External _) = return e
-
-icExpr :: Expr -> ICM Expr
-icExpr v@(Var       _) = return v
-icExpr l@(Lit       _) = return l
-icExpr (Comb ct qn es) = Comb ct qn <$> mapM icExpr es
-icExpr (Let      bs e) = Let <$> mapM icBinding bs <*> icExpr e
+icExpr :: AExpr a -> ICM (AExpr a)
+icExpr v@(AVar         _ _) = return v
+icExpr l@(ALit         _ _) = return l
+icExpr (AComb ann ct qn es) = AComb ann ct qn <$> mapM icExpr es
+icExpr (ALet      ann bs e) = ALet ann <$> mapM icBinding bs <*> icExpr e
   where icBinding (v, ve) = icExpr ve >>= \ve' -> return (v, ve')
-icExpr (Free     vs e) = Free vs <$> icExpr e
-icExpr (Or      e1 e2) = Or <$> icExpr e1 <*> icExpr e2
-icExpr (Case  ct e bs) = do
+icExpr (AFree     ann vs e) = AFree ann vs <$> icExpr e
+icExpr (AOr      ann e1 e2) = AOr ann <$> icExpr e1 <*> icExpr e2
+icExpr (ACase  ann ct e bs) = do
   v <- freshID
   bs' <- mapM icBranch bs
-  return $ Let [(v, e)] (Case ct (Var v) bs')
- where icBranch (Branch p be) = Branch p <$> icExpr be
-icExpr (Typed    e ty) = flip Typed ty <$> icExpr e
-
--- TODO: remove
--- icMain :: Rule -> ICM Rule
--- icMain (Rule vs e) = Rule vs <$> icMainExp e
--- icMain e@(External _) = return e
---
--- icMainExp e = case e of
---   Comb ct qn es
---     | ct == FuncCall -> do
---         vs <- freshIDs (length es)
---         let bs = zip vs es
---         return $ Let bs $ Comb ct qn $ map Var vs
---   _             -> return e
+  return $ ALet ann [((v, annE), e)] (ACase ann ct (AVar annE v) bs')
+ where annE                    = annExpr e
+       icBranch (ABranch p be) = ABranch p <$> icExpr be
+icExpr (ATyped   ann e ty) = flip (ATyped ann) ty <$> icExpr e

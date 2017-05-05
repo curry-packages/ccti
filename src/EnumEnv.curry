@@ -14,8 +14,8 @@
 --- ----------------------------------------------------------------------------
 module EnumEnv where
 
-import FlatCurry.Pretty (defaultOptions, ppQName)
-import FlatCurry.Types
+import FlatCurry.Annotated.Pretty (defaultOptions, ppQName)
+import FlatCurry.Annotated.Types
 import FiniteMap
 
 import PrettyPrint

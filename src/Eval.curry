@@ -7,16 +7,16 @@
 --- ----------------------------------------------------------------------------
 module Eval where
 
-import FlatCurry.Goodies
-import FlatCurry.Types
-import List               ((\\), find, intersect, nub)
+import FlatCurry.Annotated.Goodies
+import FlatCurry.Annotated.Types
+import List                        ((\\), find, intersect, nub)
 
-import CCTOptions         (CCTOpts (..))
-import EnumEnv            (EnumEnv, lookupEnum)
+import CCTOptions                  (CCTOpts (..))
+import EnumEnv                     (EnumEnv, lookupEnum)
 import FlatCurryGoodies
 import Heap
-import Output             (traceDebug, traceInfo)
-import PrettyPrint hiding (combine)
+import Output                      (traceDebug, traceInfo)
+import PrettyPrint hiding          (combine)
 import Substitution
 import Symbolic
 import Utils
@@ -49,14 +49,14 @@ data Result a
 data CEState = CEState
   { cesCCTOpts :: CCTOpts
   , cesHeap    :: Heap
-  , cesFuncs   :: [FuncDecl]
+  , cesFuncs   :: [AFuncDecl TypeExpr]
   , cesEnumEnv :: EnumEnv
   , cesFresh   :: VarIndex
   , cesTrace   :: Trace
   }
 
 --- Initial state for concolic evaluation
-initState :: CCTOpts -> EnumEnv -> [FuncDecl] -> VarIndex -> CEState
+initState :: CCTOpts -> EnumEnv -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
 initState opts eenv fs v = CEState
   { cesCCTOpts = opts
   , cesHeap    = emptyH
@@ -67,7 +67,7 @@ initState opts eenv fs v = CEState
   }
 
 --- Trace a single evaluation step
-traceStep :: Expr -> CEM a -> CEM a
+traceStep :: AExpr TypeExpr -> CEM a -> CEM a
 traceStep e x = do
   opts <- getOpts
   h    <- getHeap
@@ -75,7 +75,7 @@ traceStep e x = do
   traceDebug opts
     (pPrint $ vsep [ text "Heap:"           <+> ppHeap h
                    , text "Symbolic Trace:" <+> listSpaced (map pretty t)
-                   , text "Expression:"     <+> ppExp defaultOptions e
+                   , text "Expression:"     <+> ppExp e
                    ])
     x
 
@@ -145,11 +145,11 @@ bindBH :: VarIndex -> CEM ()
 bindBH v = modifyHeap (bindHole v)
 
 --- Bind a variable to an expression
-bindE :: VarIndex -> Expr -> CEM ()
+bindE :: VarIndex -> AExpr TypeExpr -> CEM ()
 bindE v e = modifyHeap (bindExpr v e)
 
 --- Bind a variable lazily to an expression
-bindLE :: VarIndex -> Expr -> CEM ()
+bindLE :: VarIndex -> AExpr TypeExpr -> CEM ()
 bindLE v e = modifyHeap (bindLazyExpr v e)
 
 --- Bind a variable as "free"
@@ -164,24 +164,24 @@ bindLF v = modifyHeap (bindLazyFree v)
 --- For let expressions and declarations of free variables the corresponding
 --- bindings are directly performed in the heap and thus preventing
 --- nested let expressions in the heap.
-bindArg :: Expr -> CEM Expr
+bindArg :: AExpr TypeExpr -> CEM AExpr TypeExpr
 bindArg e = case e of
-  Var  _     -> return e
-  Let  bs e' -> addBindings bs e' >>= bindArg
-  Free vs e' -> addFrees    vs e' >>= bindArg
-  _          -> do v <- freshVar
-                   bindE v e
-                   return (Var v)
+  AVar      _ _ -> return e
+  ALet  _ bs e' -> addBindings bs e' >>= bindArg
+  AFree _ vs e' -> addFrees    vs e' >>= bindArg
+  _              -> do v <- freshVar
+                       bindE v e
+                       return (AVar (annExpr e) v)
 
 --- ----------------------------------------------------------------------------
 
 --- Lookup the parameters and the rhs for a given function
-lookupRule :: QName -> CEM (Maybe ([VarIndex], Expr))
+lookupRule :: QName -> CEM (Maybe ([VarIndex], AExpr TypeExpr))
 lookupRule f = do
   mf <- gets (find (hasName f) . cesFuncs)
   return $ case mf of
-    Just (Func _ _ _ _ (Rule vs rhs)) -> Just (vs, rhs)
-    _                                 -> Nothing
+    Just (AFunc _ _ _ _ (ARule _ vs rhs)) -> Just (vs, rhs)
+    _                                     -> Nothing
 
 --- ----------------------------------------------------------------------------
 
@@ -217,36 +217,37 @@ mkDecision cid info = modify (\s -> s { cesTrace = (cid :>: info) : cesTrace s }
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: CCTOpts -> EnumEnv -> [FuncDecl] -> VarIndex -> Expr -> Expr
+ceval :: CCTOpts -> EnumEnv -> [AFuncDecl TypeExpr] -> VarIndex
+      -> AExpr TypeExpr -> AExpr TypeExpr
 ceval opts eenv fs v e = fromResult $ runState (nf e) (initState opts eenv fs v)
 
 --- Evaluate
 -- eval :: [FuncDecl] -> Expr -> Expr
 -- eval fs e = fromResult $ runState (nf e) (initState fs (-1))
 
-fromResult :: Result (Expr, CEState) -> Expr
+fromResult :: Result (AExpr TypeExpr, CEState) -> AExpr TypeExpr
 fromResult (Return (e, s))
   | e == failedExpr = e
   | otherwise       = traceSym s e
 fromResult (Choice e1 e2)  = mkOr (fromResult e1) (fromResult e2)
 
-mkOr :: Expr -> Expr -> Expr
+mkOr :: AExpr TypeExpr -> AExpr TypeExpr -> AExpr TypeExpr
 mkOr e1 e2 | e1 == failedExpr = e2
            | e2 == failedExpr = e1
-           | otherwise        = Or e1 e2
+           | otherwise        = AOr (annExpr e1) e1 e2
 
 --- Evaluate given FlatCurry expression to normal form
-nf :: Expr -> CEM Expr
+nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
 nf e = hnf e >>= \e' -> case e' of
-  Comb ConsCall c es -> Comb ConsCall c <$> mapM nf es
-  _                  -> return e'
+  AComb ty ConsCall c es -> AComb ty ConsCall c <$> mapM nf es
+  _                      -> return e'
 
 --- Evaluate given FlatCurry expression to head normal form
-hnf :: Expr -> CEM Expr
+hnf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
 hnf exp = case exp of
-  Var        v -> traceStep exp $ hnfVar  v
-  Lit        l -> traceStep exp $ hnfLit  l
-  Comb ct f es -> traceStep exp $ hnfComb ct f es
+  AVar       ty v -> traceStep exp $ hnfVar ty v
+  Lit       ty l -> traceStep exp $ hnfLit ty l
+  Comb ty ct f es -> traceStep exp $ hnfComb ty ct f es
   Let     bs e -> traceStep exp $ hnfLet  bs e
   Free    vs e -> traceStep exp $ hnfFree vs e
   Or     e1 e2 -> traceStep exp $ hnfOr   e1 e2
@@ -254,48 +255,50 @@ hnf exp = case exp of
   Typed    e _ -> traceStep exp $ hnf     e
 
 --- Concolic evaluation of a variable
-hnfVar :: VarIndex -> CEM Expr
-hnfVar i = lookupBinding i >>= \mbdg -> case mbdg of
+hnfVar :: TypeExpr -> VarIndex -> CEM (AExpr TypeExpr)
+hnfVar ty i = lookupBinding i >>= \mbdg -> case mbdg of
   Nothing            -> failS
   Just BlackHole     -> failS
   Just (BoundVar  e) -> bindBH i >> hnf e >>= \v -> bindE i v >> return v
   Just (LazyBound e) -> bindBH i >> hnf e >>= bindAndCheckLazy
-  Just FreeVar       -> return (Var i)
-  Just LazyFree      -> return (Var i)
+  Just FreeVar       -> return (AVar ty i)
+  Just LazyFree      -> return (AVar ty i)
  where
   bindAndCheckLazy v = case v of
     -- variable
-    Var w -> bindLE i v >> lookupBinding w >>= \mbdg -> case mbdg of
-      Nothing           -> failS
-      Just BlackHole    -> failS
-      Just (BoundVar e) -> bindLE w e >> return v
-      Just FreeVar      -> bindLF w   >> return v
-      _                 -> return v
+    AVar _ w -> bindLE i v >> lookupBinding w >>= \mbdg -> case mbdg of
+      Nothing                -> failS
+      Just BlackHole         -> failS
+      Just (BoundVar      e) -> bindLE w e >> return v
+      Just FreeVar           -> bindLF w   >> return v
+      _                      -> return v
     -- literal
-    Lit _               -> bindE i v >> return v
-    Comb ConsCall qn xs -> do ys <- freshVars (length xs)
-                              let val = Comb ConsCall qn (map Var ys)
-                              zipWithM_ bindLE ys xs
-                              bindE i val
-                              return val
-    _                   -> error $ "Eval.bindAndCheckLazy: " ++ show v
+    ALit                 _ _ -> bindE i v >> return v
+    AComb ty' ConsCall qn xs -> do
+      ys <- freshVars (length xs)
+      let val = AComb ty' ConsCall qn (zipWith AVar (map annExpr xs) ys)
+      zipWithM_ bindLE ys xs
+      bindE i val
+      return val
+    _                        -> error $ "Eval.bindAndCheckLazy: " ++ show v
 
 --- Concolic evaluation of a literal
-hnfLit :: Literal -> CEM Expr
-hnfLit l = return (Lit l)
+hnfLit :: TypeExpr -> Literal -> CEM (AExpr TypeExpr)
+hnfLit ty l = return (ALit ty l)
 
 --- Concolic evaluation of a combination:
 ---   * flattened function calls: check if function is builtin or user-defined
 ---                               and start corresponding concolic evaluation
 ---   * non-flattened function/constructor calls: flatten them
-hnfComb :: CombType -> QName -> [Expr] -> CEM Expr
-hnfComb ct f es = case ct of
+hnfComb :: TypeExpr -> CombType -> (QName, TypeExpr) -> [AExpr TypeExpr]
+        -> CEM (AExpr TypeExpr)
+hnfComb ty ct f es = case ct of
   FuncCall
     | all isVar es -> lookupRule f >>= \mrule -> case mrule of
       Nothing      -> ceBuiltin f es
-      Just (xs, e) -> {-trace ((show f) ++ " " ++ show xs ++ " = " ++ show e) $-} hnf (subst (mkSubst xs es) e)
-    | otherwise    -> mvs >>= \vs -> hnf (Comb ct f vs)
-  _                -> Comb ct f <$> mvs
+      Just (xs, e) -> hnf (subst (mkSubst xs es) e)
+    | otherwise    -> mvs >>= \vs -> hnf (AComb ty ct f vs)
+  _                -> AComb ty ct f <$> mvs
  where
   mvs = mapM bindArg es
 
