@@ -152,7 +152,7 @@ predefCons = listToBM (<) (<) $ map qualPrel
   , ("(,,,,,,)","tuple7"), ("(,,,,,,,)","tuple8"), ("(,,,,,,,,)","tuple9")
   , ("(,,,,,,,,,)","tuple10"), ("(,,,,,,,,,,)","tuple11")
   , ("(,,,,,,,,,,,)","tuple12"), ("(,,,,,,,,,,,,)","tuple13")
-  , ("(,,,,,,,,,,,,,)","tuple14"), ("(,,,,,,,,,,,,,,)","Tuple15")
+  , ("(,,,,,,,,,,,,,)","tuple14"), ("(,,,,,,,,,,,,,,)","tuple15")
   ]
 
 --- data types which are ignored regarding the generation of SMT data type declarations
