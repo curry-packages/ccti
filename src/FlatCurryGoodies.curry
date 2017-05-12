@@ -1,8 +1,15 @@
+--- ----------------------------------------------------------------------------
+--- This module provides some additional goodies for annotated FlatCurry.
+---
+--- @author  Jan Tikovsky
+--- @version May 2017
+--- ----------------------------------------------------------------------------
 module FlatCurryGoodies where
 
 import FlatCurry.Annotated.Goodies
 import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
+import List                        (find)
 import Pretty                      (pPrint)
 
 hasName :: QName -> AFuncDecl a -> Bool
@@ -13,8 +20,8 @@ prel :: String -> QName
 prel f = ("Prelude", f)
 
 --- Annotated FlatCurry expression representing `failed`
-failedExpr :: AExpr TypeExpr
-failedExpr = AComb (TVar 0) FuncCall ((prel "failed"), TVar 0) []
+failedExpr :: TypeExpr -> AExpr TypeExpr
+failedExpr ty = AComb ty FuncCall ((prel "failed"), ty) []
 
 --- Annotated FlatCurry type expression representing `Bool`
 boolType :: TypeExpr
@@ -31,6 +38,18 @@ charType = TCons (prel "Char") []
 --- Annotated FlatCurry type expression representing `Float`
 floatType :: TypeExpr
 floatType = TCons (prel "Float") []
+
+--- Annotated FlatCurry type expression representing `Bool -> Bool -> Bool`
+ampType :: TypeExpr
+ampType = FuncType boolType (FuncType boolType boolType)
+
+--- Annotated FlatCurry type expression representing `a -> a -> Bool`
+unifyType :: TypeExpr -> TypeExpr
+unifyType ty = FuncType ty (FuncType ty boolType)
+
+--- Annotated FlatCurry type expression representing `Bool -> a -> a`
+condType :: TypeExpr -> TypeExpr
+condType ty = FuncType boolType (FuncType ty ty)
 
 --- Annotated FlatCurry expression representing `True`
 trueExpr :: AExpr TypeExpr
@@ -63,8 +82,8 @@ tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
 tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
 
 --- Select the pattern variables of a given pattern
-patVars :: APattern a -> [(VarIndex, a)]
-patVars (APattern _ _ vs) = vs
+patVars :: APattern a -> [VarIndex]
+patVars (APattern _ _ vs) = map fst vs
 patVars (ALPattern   _ _) = []
 
 --- Get the variable index of a FlatCurry expression
@@ -80,8 +99,12 @@ eqPattern p q = case (p, q) of
   (ALPattern       _ l1, ALPattern       _ l2) -> l1 == l2
   _                                            -> False
 
+--- Find the function declaration for given qualified name
+findFunc :: QName -> [AFuncDecl a] -> Maybe (AFuncDecl a)
+findFunc qn fs = find (hasName qn) fs
+
 --- Find the matching branch for a given pattern
-findBranch :: APattern a -> [ABranchExpr a] -> Maybe (Int, [(VarIndex, a)], AExpr a)
+findBranch :: APattern a -> [ABranchExpr a] -> Maybe (Int, [VarIndex], AExpr a)
 findBranch = findBranch' 1
   where
   findBranch' _ _ []                                 = Nothing
@@ -105,21 +128,24 @@ isPartCall ct = case ct of
   FuncPartCall _ -> True
   _              -> False
 
-combine :: (QName, a) -> (QName, a) -> AExpr a -> [AExpr a] -> [AExpr a] -> AExpr a
-combine (amp, an1) (uni, an2) def es1 es2
+--- Combine given expressions lists with `=:=` or `=:<=` and resulting
+--- unifications with `&`
+combine :: QName -> QName -> AExpr TypeExpr -> [AExpr TypeExpr]
+        -> [AExpr TypeExpr] -> AExpr TypeExpr
+combine amp uni def es1 es2
   | null eqs  = def
-  | otherwise = foldr1 (mkCall an1 amp) eqs
+  | otherwise = foldr1 (mkCall (const ampType) amp) eqs
   where
-  eqs = zipWith (mkCall an2 uni) es1 es2
-  mkCall ann qn e1 e2 = AComb ann FuncCall (qn, ann) [e1, e2]
+  eqs                = zipWith (mkCall unifyType uni) es1 es2
+  mkCall tc qn e1 e2 = AComb boolType FuncCall (qn, tc (annExpr e1)) [e1, e2]
 
---- Check whether the given FlatCurry program includes a main function
-hasMain :: AProg a -> Bool
-hasMain (AProg m _ _ fs _) = any (hasName (m, "main")) fs
+--- Get the type of the main function for the given FlatCurry program
+hasMain :: AProg a -> Maybe TypeExpr
+hasMain (AProg m _ _ fs _) = findFunc (m, "main") fs >>= return . funcType
 
---- Generate a call for an annotated FlatCurry function
-fcall :: TypeExpr -> QName -> [AExpr TypeExpr] -> AExpr TypeExpr
-fcall ty qn = AComb ty FuncCall (qn, ty)
+--- Generate a call of the main function of the given module
+mainCall :: String -> TypeExpr -> AExpr TypeExpr
+mainCall m ty = AComb (resultType ty) FuncCall ((m, "main"), ty) []
 
 --- Conversion of Curry types into their FlatCurry representation
 class ToFCY a where

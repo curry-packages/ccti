@@ -14,12 +14,12 @@
 --- ----------------------------------------------------------------------------
 module EnumEnv where
 
-import FlatCurry.Annotated.Pretty (defaultOptions, ppQName)
+import FlatCurry.Annotated.Pretty (ppQName)
 import FlatCurry.Annotated.Types
 import FiniteMap
 
 import PrettyPrint
-import Symbolic         (ConsNr, NthOfM (..))
+import Symbolic                   (ConsNr, NthOfM (..))
 import Utils
 
 type EnumEnv = FM QName ConsNr
@@ -63,6 +63,6 @@ ppEEnv eenv = ppEEnv' $ fmToList eenv
   where
   ppEEnv' []        = text "[]"
   ppEEnv' env@(_:_) = listSpaced $ map ppEnum env
-    where ppEnum (qn, cnr) = ppQName defaultOptions qn
+    where ppEnum (qn, cnr) = ppQName qn
                           <+> char '\x21a6'
                           <+> pretty cnr

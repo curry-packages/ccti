@@ -3,13 +3,12 @@
 --- to markers for free variables or black holes, or the expressions.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version April 2017
+--- @version May 2017
 --- ----------------------------------------------------------------------------
 module Heap where
 
 import FiniteMap
--- import FlatCurry.Pretty (defaultOptions, ppExp, ppVarIndex)
-import FlatCurry.Types
+import FlatCurry.Annotated.Types
 
 import PrettyPrint
 
@@ -20,8 +19,8 @@ import PrettyPrint
 --- @cons FreeVar     - the variable is a logic (free) variable
 --- @cons LazyFree    - the variable is a lazily bound logic (free) variable
 data Binding = BlackHole
-             | BoundVar  Expr
-             | LazyBound Expr
+             | BoundVar  (AExpr TypeExpr)
+             | LazyBound (AExpr TypeExpr)
              | FreeVar
              | LazyFree
  deriving Show
@@ -54,11 +53,11 @@ bindHole :: VarIndex -> Heap -> Heap
 bindHole v = bindH v BlackHole
 
 --- Bind a variable to the given expression in the given heap
-bindExpr :: VarIndex -> Expr -> Heap -> Heap
+bindExpr :: VarIndex -> AExpr TypeExpr -> Heap -> Heap
 bindExpr v e = bindH v (BoundVar e)
 
 --- Bind a variable lazily to the given expression in the given heap
-bindLazyExpr :: VarIndex -> Expr -> Heap -> Heap
+bindLazyExpr :: VarIndex -> AExpr TypeExpr -> Heap -> Heap
 bindLazyExpr v e = bindH v (LazyBound e)
 
 --- Bind a variable as "free" in the given heap
@@ -77,8 +76,8 @@ unbind = flip delFromFM
 
 instance Pretty Binding where
   pretty BlackHole     = text "\x25a0"
-  pretty (BoundVar  e) = ppExp defaultOptions e
-  pretty (LazyBound e) = text "~" <> ppExp defaultOptions e
+  pretty (BoundVar  e) = ppExp e
+  pretty (LazyBound e) = text "~" <> ppExp e
   pretty FreeVar       = text "free"
   pretty LazyFree      = text "~free"
 
@@ -88,5 +87,3 @@ ppHeap h = ppHeap' $ fmToList h
   ppHeap' []     = text "[]"
   ppHeap' heap@(_:_) = listSpaced $ map ppBinding heap
     where ppBinding (i, b) = ppVarIndex i <+> char '\x21a6' <+> pretty b
-
-

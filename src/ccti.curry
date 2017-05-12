@@ -17,18 +17,13 @@ import ReadShowTerm              (readUnqualifiedTerm)
 import System                    (exitWith, getProgName)
 
 import CCTOptions                (CCTOpts (..), badUsage, getOpts)
--- import Eval                      (ceval)
-import FCY2SMTLib                (fcy2SMT, SMTState (..))
-import FlatCurryGoodies          (fcall, hasMain, printExpr)
+import EnumEnv                   (enumerate, ppEEnv)
+import Eval                      (ceval)
+import FCY2SMTLib                (fcy2SMT)
+import FlatCurryGoodies          (hasMain, mainCall, printExpr)
 import IdentifyCases             (idCases)
 import Output                    (info, status)
 import PrettyPrint hiding        ((</>))
-
---- remove
-import qualified SMTLib.Types as SMT
-import SMTLib.Pretty
-import Debug (trace)
-
 
 main :: IO ()
 main = do
@@ -43,18 +38,18 @@ main = do
   callFrontendWithParams FCY params' (head files)
   status opts "Reading FlatCurry file(s)"
   prog@(AProg m _ _ _ _) <- readAnnFlatCurry (head files)
-  if not (hasMain prog)
-    then badUsage exec ["There is no main function in the given Curry file"]
-    else do
+  case hasMain prog of
+    Nothing -> badUsage exec ["There is no main function in the given Curry file"]
+    Just ty -> do
       (ts, fs) <- getTysFuns m
       status opts "Evaluating normal form of main"
       let (fs', v) = idCases fs
           -- todo: remove
-          smtstate = SMT.SMTLib $ smtDecls $ fcy2SMT ts
-      trace (pPrint $ pretty smtstate) $ return ()
---       info opts (pPrint $ text "Enumeration environment:" <+> ppEEnv eenv)
+          eenv     = enumerate ts
+          smtState = fcy2SMT ts
+      info opts (pPrint $ text "Generated SMTLIB data:" <+> pretty smtState)
       info opts (pPrint $ text "Functions:" <+> ppFuncDecls (filter (isLocal m) fs'))
---      printExpr $ ceval opts eenv fs' v (fcall (m, "main") [])
+      printExpr $ ceval opts eenv fs' v (mainCall m ty)
 
 isLocal :: String -> AFuncDecl TypeExpr -> Bool
 isLocal m (AFunc qn _ _ _ _) = m == fst qn
@@ -64,15 +59,17 @@ isLocal m (AFunc qn _ _ _ _) = m == fst qn
 
 -- Get all local functions as well as all directly and indirectly imported ones
 getTysFuns :: String -> IO ([TypeDecl], [AFuncDecl TypeExpr])
-getTysFuns mod = getTysFuns' [] [] [] mod >>= \(types, funs, _) -> return (types, funs)
-  where
-    getTysFuns' ts fs ms m
-      | m `elem` ms = return (ts, fs, ms)
-      | otherwise   = do
-          (AProg _ is mts mfs _) <- readAnnFlatCurry m
-          foldIO (\(ts', fs', ms') i -> getTysFuns' ts' fs' ms' i)
-                 (ts ++ mts, fs ++ mfs, m:ms)
-                 is
+getTysFuns mod = do
+  (ts, fs, _) <- getTysFuns' [] [] [] mod
+  return (ts, fs)
+ where
+  getTysFuns' ts fs ms m
+    | m `elem` ms = return (ts, fs, ms)
+    | otherwise   = do
+        (AProg _ is mts mfs _) <- readAnnFlatCurry m
+        foldIO (\(ts', fs', ms') i -> getTysFuns' ts' fs' ms' i)
+               (ts ++ mts, fs ++ mfs, m:ms)
+               is
 
 -- TODO: Remove when there is support for reading annotated FlatCurry files
 -- in the libraries

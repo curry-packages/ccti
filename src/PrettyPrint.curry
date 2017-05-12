@@ -1,8 +1,9 @@
 --- ----------------------------------------------------------------------------
---- This module provides a type class for pretty printing.
+--- This module provides a type class for pretty printing and bundles the
+--- pretty printing libraries for Curry and annotated FlatCurry.
 ---
 --- @author  Jan Tikovsky
---- @version April 2017
+--- @version May 2017
 --- ----------------------------------------------------------------------------
 module PrettyPrint ( module FlatCurry.Annotated.Pretty
                    , module Pretty

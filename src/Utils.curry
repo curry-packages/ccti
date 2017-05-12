@@ -1,3 +1,9 @@
+--- ----------------------------------------------------------------------------
+--- This module provides some utility operations.
+---
+--- @author  Björn Peemöller, Jan Tikovsky
+--- @version May 2017
+--- ----------------------------------------------------------------------------
 module Utils where
 
 -- some useful combinators for monads
