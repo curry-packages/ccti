@@ -17,6 +17,8 @@ import List            (isPrefixOf)
 
 import           Bimap
 import           FlatCurryGoodies    (prel)
+import           PrettyPrint
+import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
 import           Utils               ((<$>), mapM)
 
@@ -41,6 +43,18 @@ initSMTState = SMTState
   , smtCMap  = predefCons
   }
 
+--- Pretty printing of an SMTState
+instance Pretty SMTState where
+  pretty (SMTState ds tmap cmap) = vsepBlank
+    [ text "Generated SMTLib datatype declarations"
+    , vsep (map pretty ds)
+    , text "Type Map: Mapping FlatCurry types to SMT sorts"
+    , ppBM ppEntry tmap
+    , text "Constructor Map: Mapping FlatCurry constructors to SMT constructors"
+    , ppBM ppEntry cmap
+    ]
+    where ppEntry (k, v) = ppQName k <+> rarrow <+> text v
+
 --- SMT transformation monad
 data SMTTrans a = SMTTrans { runSMTTrans :: SMTState -> (a, SMTState) }
 
@@ -59,15 +73,17 @@ addSMTDecl d = modify (\s -> s { smtDecls = d : smtDecls s })
 
 --- Create an SMTLib sort representation for the given FlatCurry type
 newSMTSort :: QName -> SMTTrans ()
-newSMTSort qn = modify $ \s -> let tmap = smtTMap s in case lookupBM qn tmap of
-  Nothing -> s { smtTMap = addToBM qn (snd qn) tmap }
-  Just _  -> error "FCY2SMTLib.newSMTSort"
+newSMTSort qn@(_, tc) = modify $ \s -> let tmap = smtTMap s
+  in case lookupBM qn tmap of
+       Nothing -> s { smtTMap = addToBM qn tc tmap }
+       Just _  -> s
 
 --- Create an SMTLib constructor for the given FlatCurry constructor
 newSMTCons :: QName -> SMTTrans ()
-newSMTCons qn = modify $ \s -> let cmap = smtCMap s in case lookupBM qn cmap of
-  Nothing -> s { smtCMap = addToBM qn (map toLower (snd qn)) cmap }
-  Just _  -> error "FCY2SMTLib.newSMTCons"
+newSMTCons qn@(_, c) = modify $ \s -> let cmap = smtCMap s
+  in case lookupBM qn cmap of
+       Nothing -> s { smtCMap = addToBM qn (map toLower c) cmap }
+       Just _  -> s
 
 fcy2SMT :: [TypeDecl] -> SMTState
 fcy2SMT ts = snd $ (runSMTTrans $ mapM tdecl2SMT ts) initSMTState
@@ -79,21 +95,21 @@ tdecl2SMT td = case td of
         newSMTSort qn
         cs' <- mapM cdecl2SMT cs
         addSMTDecl (SMT.DeclareDatatypes (map (typeVars !!) tvs)
-          (lookupWithDefaultFM typeDict t qn) cs')
+          (lookupWithDefaultBM t qn predefTypes) cs')
   _                                        -> return ()
 
 cdecl2SMT :: ConsDecl -> SMTTrans SMT.ConsDecl
 cdecl2SMT (Cons qn@(_, c) _ _ tys) = do
   newSMTCons qn
   tys' <- mapM ty2SMT tys
-  let c' = map toLower (lookupWithDefaultFM consDict c qn)
+  let c' = map toLower (lookupWithDefaultBM c qn predefCons)
   return $ SMT.Cons c' (zipWith SMT.SV (map (\n -> c' ++ '_' : show n) [1..]) tys')
 
 ty2SMT :: TypeExpr -> SMTTrans SMT.Sort
 ty2SMT (TVar               v) = return $ SMT.SComb (typeVars !! v) []
 ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
 ty2SMT (TCons qn@(_, tc) tys) =
-  SMT.SComb (lookupWithDefaultFM typeDict tc qn) <$> mapM ty2SMT tys
+  SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
 
 -- map predefined types and constructors to the corresponding SMTLib name
 
@@ -113,11 +129,13 @@ ty2SMT (TCons qn@(_, tc) tys) =
 typeVars :: [String]
 typeVars = [c : if n == 0 then [] else show n |  n <- [0 ..], c <- ['a' .. 'z']]
 
---- dictionaries for types and constructors which are named differently
---- in SMTLib type dictionary
-typeDict :: FM QName SMT.Symbol
-typeDict = listToFM (<) $ map qualPrel
-  [ ("()","Unit"), ("[]","List"), ("(,)","Tuple2"), ("(,,)","Tuple3")
+--- predefined SMTLib representations
+
+--- predefined basic types and type constructors
+predefTypes :: BM QName SMT.Ident
+predefTypes = listToBM (<) (<) $ map qualPrel
+  [ ("Bool","Bool"), ("Int","Int"), ("Float","Float"), ("[]","List")
+  , ("()","Unit"), ("[]","List"), ("(,)","Tuple2"), ("(,,)","Tuple3")
   , ("(,,,)","Tuple4"), ("(,,,,)","Tuple5"), ("(,,,,,)","Tuple6")
   , ("(,,,,,,)","Tuple7"), ("(,,,,,,,)","Tuple8"), ("(,,,,,,,,)","Tuple9")
   , ("(,,,,,,,,,)","Tuple10"), ("(,,,,,,,,,,)","Tuple11")
@@ -125,28 +143,17 @@ typeDict = listToFM (<) $ map qualPrel
   , ("(,,,,,,,,,,,,,)","Tuple14"), ("(,,,,,,,,,,,,,,)","Tuple15")
   ]
 
---- constructor dictionary
-consDict :: FM QName SMT.Ident
-consDict = listToFM (<) $ map qualPrel
-  [ ("()","unit"), ("[]","nil"), (":", "insert"), ("(,)","tuple2"), ("(,,)","tuple3")
+--- predefined constructors
+predefCons :: BM QName SMT.Ident
+predefCons = listToBM (<) (<) $ map qualPrel
+  [ ("False","false"), ("True","true"), ("[]","nil"), (":","insert")
+  , ("()","unit"), ("[]","nil"), (":", "insert"), ("(,)","tuple2"), ("(,,)","tuple3")
   , ("(,,,)","tuple4"), ("(,,,,)","tuple5"), ("(,,,,,)","tuple6")
   , ("(,,,,,,)","tuple7"), ("(,,,,,,,)","tuple8"), ("(,,,,,,,,)","tuple9")
   , ("(,,,,,,,,,)","tuple10"), ("(,,,,,,,,,,)","tuple11")
   , ("(,,,,,,,,,,,)","tuple12"), ("(,,,,,,,,,,,,)","tuple13")
   , ("(,,,,,,,,,,,,,)","tuple14"), ("(,,,,,,,,,,,,,,)","Tuple15")
   ]
-
---- predefined SMTLib representations
-
---- predefined basic types and type constructors
-predefTypes :: BM QName SMT.Ident
-predefTypes = listToBM (<) (<) $ map qualPrel
-  [("Bool","Bool"), ("Int","Int"), ("Float","Float"), ("[]","List")]
-
---- predefined constructors
-predefCons :: BM QName SMT.Ident
-predefCons = listToBM (<) (<) $ map qualPrel
-  [("False","false"), ("True","true"), ("[]","nil"), (":","insert")]
 
 --- data types which are ignored regarding the generation of SMT data type declarations
 ignoredTypes :: [String]
