@@ -2,10 +2,15 @@ module Bimap where
 
 import FiniteMap
 import PrettyPrint
-import Utils       (swap)
 
 --- bidirectional map
 data BM a b = BM (FM a b) (FM b a)
+
+fmA :: BM a b -> FM a b
+fmA (BM x _) = x
+
+fmB :: BM a b -> FM b a
+fmB (BM _ y) = y
 
 emptyBM :: (a -> a -> Bool) -> (b -> b -> Bool) -> BM a b
 emptyBM cmp1 cmp2 = BM (emptyFM cmp1) (emptyFM cmp2)
@@ -43,10 +48,12 @@ deleteBd :: (Eq a, Eq b) => a -> b -> BM a b -> BM a b
 deleteBd k v = delFromBM k . delFromBMR v
 
 delete :: (Eq a, Eq b) => Either a b -> BM a b -> BM a b
-delete e (BM fm1 fm2) = BM (perhaps (flip delFromFM) x fm1)
-                           (perhaps (flip delFromFM) y fm2)
+delete e (BM fm1 fm2) = BM (perhaps1 (flip delFromFM) x fm1)
+                           (perhaps2 (flip delFromFM) y fm2)
   where
-  perhaps = maybe id
+  -- TODO: polymorphic lets
+  perhaps1 = maybe id
+  perhaps2 = maybe id
   x = either Just (lookupFM fm2) e
   y = either (lookupFM fm1) Just e
 
