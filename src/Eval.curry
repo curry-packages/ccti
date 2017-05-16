@@ -11,18 +11,20 @@ import FlatCurry.Annotated.Goodies
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
 
+-- TODO: remove and provide access to cmap tmap via functions in FCY2SMTLib ?
+
 import CCTOptions                  (CCTOpts (..))
-import EnumEnv                     (EnumEnv, lookupEnum)
+import FCY2SMTLib                  ( SMTInfo (..), addTypeInfo, lookupCons
+                                   , lookupType)
 import FlatCurryGoodies
 import Heap
 import Output                      (traceDebug, traceInfo)
 import PrettyPrint hiding          (combine)
+import SMTLib.Goodies
+import SMTLib.Types                (Sort, Term)
 import Substitution
 import Symbolic
 import Utils
-
-import Debug
-import FiniteMap
 
 infixl 3 <|>
 
@@ -44,24 +46,25 @@ data Result a
 ---   * the current ccti options,
 ---   * the concrete heap containing variable bindings,
 ---   * a list of all defined function declarations,
+---   * SMT representations of FlatCurry types and constructors,
 ---   * an index for fresh variables,
 ---   * a trace of symbolic information for case branches.
 data CEState = CEState
   { cesCCTOpts :: CCTOpts
   , cesHeap    :: Heap
   , cesFuncs   :: [AFuncDecl TypeExpr]
-  , cesEnumEnv :: EnumEnv
+  , cesSMTInfo :: SMTInfo
   , cesFresh   :: VarIndex
   , cesTrace   :: Trace
   }
 
 --- Initial state for concolic evaluation
-initState :: CCTOpts -> EnumEnv -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
-initState opts eenv fs v = CEState
+initState :: CCTOpts -> SMTInfo -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
+initState opts smtInfo fs v = CEState
   { cesCCTOpts = opts
   , cesHeap    = emptyH
   , cesFuncs   = fs
-  , cesEnumEnv = eenv
+  , cesSMTInfo = smtInfo
   , cesFresh   = v
   , cesTrace   = []
   }
@@ -203,12 +206,34 @@ freshVars n = sequence $ replicate n freshVar
 getTrace :: CEM Trace
 getTrace = gets cesTrace
 
-enum :: QName -> CEM ConsNr
-enum qn = do
-  eenv <- gets cesEnumEnv
-  case lookupEnum qn eenv of
-    Just cnr -> return cnr
-    Nothing  -> error $ "Eval.enumerate: Undefined constructor " ++ show qn
+--- Get the SMTLIB information
+getSMTInfo :: CEM SMTInfo
+getSMTInfo = gets cesSMTInfo
+
+toTerm :: QName -> [VarIndex] -> CEM Term
+toTerm qn vs = do
+  smtInfo <- getSMTInfo
+  case lookupCons qn smtInfo of
+    Nothing -> error $ "Eval.toTerm: No SMTLIB representation for constructor "
+                 ++ show qn
+    Just c  -> return $ tcomb c (map tvar vs)
+
+toSort :: TypeExpr -> CEM Sort
+toSort (ForallType _ _) = error "Eval.toSort"
+toSort (TVar       _) = return tyVar
+toSort (FuncType _ _) = return tyFun
+toSort (TCons qn tys) = do
+  smtInfo <- getSMTInfo
+  case lookupType qn smtInfo of
+    Nothing -> error $ "Eval.toSort: No SMTLIB representation for type constructor "
+                 ++ show qn
+    Just tc -> tyComb tc <$> mapM toSort tys
+
+addSMTVarDecl :: VarIndex -> TypeExpr -> CEM ()
+addSMTVarDecl vi ty = do
+  state <- get
+  s     <- toSort ty
+  put state { cesSMTInfo = addTypeInfo vi ty s (cesSMTInfo state) }
 
 --- Add a decision with symbolic information for case expression `cid` to the trace
 mkDecision :: VarIndex -> SymInfo -> CEM ()
@@ -217,24 +242,16 @@ mkDecision cid info = modify (\s -> s { cesTrace = (cid :>: info) : cesTrace s }
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: CCTOpts -> EnumEnv -> [AFuncDecl TypeExpr] -> VarIndex
-      -> AExpr TypeExpr -> AExpr TypeExpr
-ceval opts eenv fs v e = fromResult $ runState (nf e) (initState opts eenv fs v)
+ceval :: CCTOpts -> SMTInfo -> [AFuncDecl TypeExpr] -> VarIndex
+      -> AExpr TypeExpr -> [(AExpr TypeExpr, CEState)]
+ceval opts smtInfo fs v e
+  = fromResult $ runState (nf e) (initState opts smtInfo fs v)
 
---- Evaluate
--- eval :: [FuncDecl] -> Expr -> Expr
--- eval fs e = fromResult $ runState (nf e) (initState fs (-1))
-
-fromResult :: Result (AExpr TypeExpr, CEState) -> AExpr TypeExpr
+fromResult :: Result (AExpr TypeExpr, CEState) -> [(AExpr TypeExpr, CEState)]
 fromResult (Return (e, s))
-  | e == failedExpr (annExpr e) = e
-  | otherwise       = traceSym s e
-fromResult (Choice e1 e2)  = mkOr (fromResult e1) (fromResult e2)
-
-mkOr :: AExpr TypeExpr -> AExpr TypeExpr -> AExpr TypeExpr
-mkOr e1 e2 | e1 == failedExpr (annExpr e1) = e2
-           | e2 == failedExpr (annExpr e2) = e1
-           | otherwise                     = AOr (annExpr e1) e1 e2
+  | e == failedExpr (annExpr e) = []
+  | otherwise                   = traceSym s [(e, s)]
+fromResult (Choice       e1 e2) = fromResult e1 ++ fromResult e2
 
 --- Evaluate given FlatCurry expression to normal form
 nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -337,6 +354,7 @@ addFrees tvs e = do
 hnfOr :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
 hnfOr e1 e2 = hnf e1 <|> hnf e2
 
+--- Concolic evaluation of a case expression
 hnfCase :: CaseType -> AExpr TypeExpr -> [ABranchExpr TypeExpr] -> CEM (AExpr TypeExpr)
 hnfCase ct e bs = do
   (cid, e')      <- rmvCaseID e
@@ -345,11 +363,14 @@ hnfCase ct e bs = do
     ALit ty l -> case findBranch (ALPattern ty l) bs of
       Nothing          -> failS ty
       Just (_, _,  be) -> hnf be
-    AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
+    AComb ty ConsCall c@(qn, cty) es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        cnr <- enum (fst c)
-        mkDecision cid (SymInfo (n :/: bcnt) vi cnr (concatMap getVarIdx es))
+        let ys = map varNr es
+        -- add smtlib declarations for all variables
+        zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
+        t <- toTerm qn ys
+        mkDecision cid (SymInfo (BNr n bcnt) vi t)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -361,10 +382,11 @@ hnfCase ct e bs = do
         narrowCase = foldr choice (failS ty) $ zipWith guess [1 ..] bs
 
         guess _ (ABranch (ALPattern  ty' l) be) = bindE i (ALit ty' l) >> hnf be
-        guess n (ABranch (APattern ty' c txs) be) = do
+        guess n (ABranch (APattern ty' c@(qn, cty) txs) be) = do
           ys  <- freshVars (length txs)
-          cnr <- enum (fst c)
-          mkDecision cid (SymInfo (n :/: bcnt) vi cnr ys)
+          zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
+          t   <- toTerm qn ys
+          mkDecision cid (SymInfo (BNr n bcnt) vi t)
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
@@ -381,31 +403,6 @@ rmvCaseID e = case e of
                _                  -> error $
                  "Eval.rmvCaseID: Unexpected binding " ++ show mbdg
   _          -> error $ "Eval.rmvCaseID: Expected case id but found " ++ show e
-
---- Concolic evaluation of a case expression
--- hnfCase :: CaseType -> Expr -> [BranchExpr] -> CEM Expr
--- hnfCase ct e bs = hnf e >>= \v -> case v of
---   Lit l -> case findBranch (LPattern l) bs of
---     Nothing       -> failS
---     Just (_,  be) -> hnf be
---   Comb ConsCall c es -> case findBranch (Pattern c []) bs of
---     Nothing       -> failS
---     Just (vs, be) -> hnf (subst (mkSubst vs es) be)
---   Comb FuncCall _ _
---     | v == failedExpr -> failS
---   Var i
---     | ct == Rigid -> error "Suspended"
---     | otherwise   -> narrowCase
---     where
---       narrowCase = foldr choice failS $ map guess bs
---
---       guess (Branch (LPattern   l) be) = bindE i (Lit l) >> hnf be
---       guess (Branch (Pattern c xs) be) = do
---         ys <- freshVars (length xs)
---         let es' = map Var ys
---         bindE i (Comb ConsCall c es')
---         hnf (subst (mkSubst xs es') be)
---   _ -> error $ "Eval.hnfCase: " ++ show v
 
 --- Failing evaluation
 failS :: TypeExpr -> CEM (AExpr TypeExpr)

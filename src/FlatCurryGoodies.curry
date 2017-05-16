@@ -81,6 +81,12 @@ cons ty = AComb lty ConsCall ((prel ":"), lty)
 tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
 tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
 
+--- Get argument and result types of a given type signature
+getTypes :: TypeExpr -> [TypeExpr]
+getTypes ty@(TVar         _) = [ty]
+getTypes ty@(TCons      _ _) = [ty]
+getTypes (FuncType  ty1 ty2) = ty1 : getTypes ty2
+
 --- Select the pattern variables of a given pattern
 patVars :: APattern a -> [VarIndex]
 patVars (APattern _ _ vs) = map fst vs
