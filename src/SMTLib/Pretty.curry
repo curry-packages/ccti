@@ -224,7 +224,7 @@ instance Pretty CmdResponse where
   pretty SuccessRsp                    = text "success"
   pretty UnsupportedRsp                = text "unsupported"
   pretty (ErrorRsp                str) = parens (text "error"
-                                           <+> dquotes (text str)))
+                                           <+> dquotes (text str))
   pretty (CheckSatRsp              cs) = pretty cs
   pretty (EchoRsp                 str) = text str
   pretty (GetAssertionsRsp         ts) = parent (map pretty ts)
