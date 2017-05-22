@@ -16,9 +16,17 @@ var2SMT vi = 'x' : show (abs vi)
 
 --- smart constructors for SMT terms
 
---- smart constructor for numeral SMT terms
-tnum :: Int -> Term
-tnum = TConst . Num
+--- smart constructor for integer SMT terms
+tint :: Int -> Term
+tint = TConst . Num
+
+--- smart constructor for floating point SMT terms
+tfloat :: Float -> Term
+tfloat = TConst . Dec
+
+--- smart constructor for character SMT terms (represented as string)
+tchar :: Char -> Term
+tchar = TConst . Str . (: [])
 
 --- smart constructor for variables
 tvar :: VarIndex -> Term

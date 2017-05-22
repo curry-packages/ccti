@@ -86,6 +86,7 @@ getTypes :: TypeExpr -> [TypeExpr]
 getTypes ty@(TVar         _) = [ty]
 getTypes ty@(TCons      _ _) = [ty]
 getTypes (FuncType  ty1 ty2) = ty1 : getTypes ty2
+getTypes (ForallType    _ _) = error "FlatCurryGoodies.getTypes: forall"
 
 --- Select the pattern variables of a given pattern
 patVars :: APattern a -> [VarIndex]

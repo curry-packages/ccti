@@ -17,6 +17,7 @@ instance Pretty Keyword where
 
 instance Pretty SpecConstant where
   pretty (Num n) = int n
+  pretty (Dec f) = float f
   pretty (Str s) = text s
 
 instance Pretty SExpr where

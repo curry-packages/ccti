@@ -210,6 +210,7 @@ getTrace = gets cesTrace
 getSMTInfo :: CEM SMTInfo
 getSMTInfo = gets cesSMTInfo
 
+--- Transform a constructor expression into an SMTLib term
 toTerm :: (QName, TypeExpr) -> [VarIndex] -> CEM Term
 toTerm (qn, ty) vs = do
   smtInfo <- getSMTInfo
@@ -218,6 +219,12 @@ toTerm (qn, ty) vs = do
     Nothing -> error $ "Eval.toTerm: No SMTLIB representation for constructor "
                  ++ show qn
     Just c  -> return $ qtcomb c s (map tvar vs)
+
+--- Transform a literal into an SMTLib term
+toLitTerm :: Literal -> Term
+toLitTerm (Intc   i) = tint i
+toLitTerm (Floatc f) = tfloat f
+toLitTerm (Charc  c) = tchar c
 
 toSort :: TypeExpr -> CEM Sort
 toSort (ForallType _ _) = error "Eval.toSort"
@@ -363,7 +370,10 @@ hnfCase ct e bs = do
   hnf ve >>= \v -> case v of
     ALit ty l -> case findBranch (ALPattern ty l) bs of
       Nothing          -> failS ty
-      Just (_, _,  be) -> hnf be
+      Just (n, _,  be) -> do
+        addSMTVarDecl vi ty
+        mkDecision cid (SymInfo (BNr n bcnt) vi (toLitTerm l))
+        hnf be
     AComb ty ConsCall c@(_, cty) es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
@@ -382,7 +392,11 @@ hnfCase ct e bs = do
       where
         narrowCase = foldr choice (failS ty) $ zipWith guess [1 ..] bs
 
-        guess _ (ABranch (ALPattern  ty' l) be) = bindE i (ALit ty' l) >> hnf be
+        guess n (ABranch (ALPattern  ty' l) be) = do
+          addSMTVarDecl vi ty'
+          mkDecision cid (SymInfo (BNr n bcnt) vi (toLitTerm l))
+          bindE i (ALit ty' l)
+          hnf be
         guess n (ABranch (APattern ty' c@(_, cty) txs) be) = do
           ys  <- freshVars (length txs)
           zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)

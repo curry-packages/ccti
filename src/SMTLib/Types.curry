@@ -21,8 +21,9 @@ data SMTLib = SMTLib [Command]
 
 --- S-expressions
 
--- decimal, hexadecimal, binary missing
+-- hexadecimal, binary missing
 data SpecConstant = Num Numeral
+                  | Dec Float
                   | Str String
   deriving (Eq, Show)
 
