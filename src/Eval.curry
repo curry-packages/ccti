@@ -210,13 +210,14 @@ getTrace = gets cesTrace
 getSMTInfo :: CEM SMTInfo
 getSMTInfo = gets cesSMTInfo
 
-toTerm :: QName -> [VarIndex] -> CEM Term
-toTerm qn vs = do
+toTerm :: (QName, TypeExpr) -> [VarIndex] -> CEM Term
+toTerm (qn, ty) vs = do
   smtInfo <- getSMTInfo
+  s       <- toSort (resultType ty)
   case lookupCons qn smtInfo of
     Nothing -> error $ "Eval.toTerm: No SMTLIB representation for constructor "
                  ++ show qn
-    Just c  -> return $ tcomb c (map tvar vs)
+    Just c  -> return $ qtcomb c s (map tvar vs)
 
 toSort :: TypeExpr -> CEM Sort
 toSort (ForallType _ _) = error "Eval.toSort"
@@ -363,13 +364,13 @@ hnfCase ct e bs = do
     ALit ty l -> case findBranch (ALPattern ty l) bs of
       Nothing          -> failS ty
       Just (_, _,  be) -> hnf be
-    AComb ty ConsCall c@(qn, cty) es -> case findBranch (APattern ty c []) bs of
+    AComb ty ConsCall c@(_, cty) es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
         let ys = map varNr es
         -- add smtlib declarations for all variables
         zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
-        t <- toTerm qn ys
+        t <- toTerm c ys
         mkDecision cid (SymInfo (BNr n bcnt) vi t)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
@@ -382,10 +383,10 @@ hnfCase ct e bs = do
         narrowCase = foldr choice (failS ty) $ zipWith guess [1 ..] bs
 
         guess _ (ABranch (ALPattern  ty' l) be) = bindE i (ALit ty' l) >> hnf be
-        guess n (ABranch (APattern ty' c@(qn, cty) txs) be) = do
+        guess n (ABranch (APattern ty' c@(_, cty) txs) be) = do
           ys  <- freshVars (length txs)
           zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
-          t   <- toTerm qn ys
+          t   <- toTerm c ys
           mkDecision cid (SymInfo (BNr n bcnt) vi t)
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys

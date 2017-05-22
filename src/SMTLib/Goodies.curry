@@ -28,6 +28,10 @@ tvar vi = tcomb (var2SMT vi) []
 tcomb :: Ident -> [Term] -> Term
 tcomb i ts = TComb (Id i) ts
 
+--- smart constructor for qualified constructor terms
+qtcomb :: Ident -> Sort -> [Term] -> Term
+qtcomb i s ts = TComb (As i s) ts
+
 --- smart constructors for SMT sorts
 
 --- smart constructor for a sort representing type variables
