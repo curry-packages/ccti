@@ -16,6 +16,7 @@ data Token   -- symbols
            | Bang
            | Underscore
            | Colon
+           | Comma
            | DQuote
              -- reserved keywords
            | KW_as
@@ -157,6 +158,7 @@ scan s@(c:cs) = case c of
   '_'                           -> Underscore : scan cs
   ':'                           -> Colon      : scan cs
   '"'                           -> DQuote     : scan cs
+  ','                           -> Comma      : scan cs
   ';'                           -> scanLineCmt cs
   _ | isNumber c                -> scanNum s
     | isAlpha  c || isSpecial c -> scanKWOrId s

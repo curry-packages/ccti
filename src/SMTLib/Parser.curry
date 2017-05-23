@@ -14,11 +14,11 @@ import qualified SMTLib.Types   as SMT
 
 type SMTParser a = Parser Token a
 
-parseCmdRsp :: String -> SMT.CmdResponse
-parseCmdRsp str = case (runParser parseResponse . scan) str of
-  Left  msg       -> error msg
-  Right ([], rsp) -> rsp
-  Right (ts,   _) -> error $ "Incomplete parse: " ++ show ts
+parseCmdRsps :: String -> Either String [SMT.CmdResponse]
+parseCmdRsps str = case (runParser (many parseResponse) . scan) str of
+  Left  msg        -> Left msg
+  Right ([], rsps) -> Right rsps
+  Right (ts,    _) -> Left $ "Incomplete parse: " ++ show ts
 
 parseResponse :: SMTParser SMT.CmdResponse
 parseResponse =  terminal KW_success     *> yield SMT.SuccessRsp
@@ -36,8 +36,8 @@ parseResponse =  terminal KW_success     *> yield SMT.SuccessRsp
              <|> yield SMT.GetOptionRsp <*> parseAttrValue
              <|> yield SMT.GetProofRsp <*> parseSExpr
              -- the get-unsat-assumptions-response and the get-unsat-core-response overlap
-             <|> yield SMT.GetUnsatAssumptionsRsp <*> many parseSym
-             <|> yield SMT.GetUnsatCoreRsp <*> many parseSym
+--              <|> yield SMT.GetUnsatAssumptionsRsp <*> many parseSym
+--              <|> yield SMT.GetUnsatCoreRsp <*> many parseSym
 
 --- parser for get-assertions-response
 parseGetAssertionsRsp :: SMTParser SMT.CmdResponse
@@ -136,7 +136,26 @@ parseNum = Parser $ \tokens -> case tokens of
 
 --- parser for a string
 parseStr :: SMTParser String
-parseStr = terminal DQuote *> parseSym <* terminal DQuote
+parseStr = Parser $ \tokens -> case tokens of
+  [] -> runParser eof tokens
+  DQuote : ts -> let (toks, _:rs) = span (/= DQuote) ts
+                 in Right (rs, unwords (map toStr toks))
+  t      : ts -> runParser (unexpected t) ts
+ where
+  toStr tok = case tok of
+    Num      n -> show n
+    Id       s -> s
+    BVal     b -> show b
+    Colon      -> ":"
+    Semi       -> ";"
+    Comma      -> ","
+    Bang       -> "!"
+    Underscore -> "_"
+    LParen     -> "("
+    RParen     -> ")"
+    t          -> show t
+
+--   terminal DQuote *> parseSym <* terminal DQuote
 
 --- parser for a symbol
 parseSym :: SMTParser SMT.Symbol
@@ -154,8 +173,12 @@ parseValPair =
 parseTerm :: SMTParser SMT.Term
 parseTerm = Parser $ \tokens -> case tokens of
   []          -> (runParser eof) tokens
-  Num n  : ts -> Right (ts, SMT.TConst (SMT.Num n))
-  Id  s  : ts -> Right (ts, SMT.TComb (SMT.Id s) [])
+  Num  n : ts -> Right (ts, SMT.TConst (SMT.Num n))
+  BVal b : ts -> let s = case b of
+                           True  -> "true"
+                           False -> "false"
+                 in Right (ts, SMT.TComb (SMT.Id s) [])
+  Id   s : ts -> Right (ts, SMT.TComb (SMT.Id s) [])
   LParen : ts -> (runParser parseParenTerm) ts
   t      : ts -> (runParser (unexpected t)) ts
 
