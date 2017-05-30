@@ -1,6 +1,6 @@
 --- ----------------------------------------------------------------------------
 --- This module provides operations for an interactive communication with
---- SMT solvers which implement the SMTLIB interface.
+--- SMT solvers - which implement the SMT-LIB interface - via stdin and stdout.
 --- Currently only the Z3 SMT solver is supported.
 ---
 --- @author  Jan Tikovsky
@@ -54,15 +54,12 @@ z3 = SMT { executable = "z3", flags = ["-smt2", "-in"] }
 type SolverSession = (Handle, Handle, Handle)
 
 --- Start a new SMT solver session
-newSession :: Solver -> [SMT.Command] -> IO SolverSession
-newSession solver cmds = do
-  session <- execCmd $ unwords $ executable solver : flags solver
-  addCmds session cmds
-  return session
+newSession :: Solver -> IO SolverSession
+newSession solver = execCmd $ unwords $ executable solver : flags solver
 
 --- Terminate an SMT solver session
 terminateSession :: SolverSession -> IO ()
-terminateSession (sin, _, _) = hClose sin
+terminateSession s@(sin, _, _) = sendCmds s [SMT.Exit] >> hClose sin
 
 --- Add given SMTLib commands to SMT solver
 addCmds :: SolverSession -> [SMT.Command] -> IO ()
@@ -75,6 +72,10 @@ enterScope = flip addCmds [SMT.Push 1]
 --- Leave the current scope
 exitScope :: SolverSession -> IO ()
 exitScope = flip addCmds [SMT.Pop 1]
+
+--- Reset internal stack of SMT solver
+resetStack :: SolverSession -> IO ()
+resetStack = flip addCmds [SMT.Pop 1, SMT.Push 1]
 
 --- Check for syntactic errors, if the model is satisfiable and compute model
 checkNSolve :: SolverSession -> IO Result
@@ -131,7 +132,7 @@ hGetUntil h d = do
 
 -- example :: IO ()
 -- example = do
---   s <- newSession z3 []
+--   s <- newSession z3
 --   addCmds s [ SMT.DeclareDatatypes ["a"] "Maybe" [SMT.Cons "nothing" [], SMT.Cons "just" [SMT.SV "just_1" (SMT.SComb "a" [])]]
 --             , SMT.DeclareDatatypes [] "Unit" [SMT.Cons "unit" []]
 --             ]
@@ -143,4 +144,5 @@ hGetUntil h d = do
 --             ]
 --   model <- checkNSolve s
 --   putStrLn $ show model
+--   terminateSession s
 
