@@ -17,19 +17,20 @@ import ReadShowTerm              (readUnqualifiedTerm)
 import System                    (exitWith, getProgName)
 
 import CCTOptions                (CCTOpts (..), badUsage, getOpts)
-import Eval                      (ceval, CEState (..))
+-- import Eval                      (ceval, CEState (..))
 import FCY2SMTLib                (fcy2SMT)
-import FlatCurryGoodies          (hasMain, mainCall, printExpr)
+import FlatCurryGoodies          (getMainBody, printExpr)
 import IdentifyCases             (idCases)
 import Output                    (info, status)
 import PrettyPrint hiding        ((</>))
+import Search                    (csearch)
 
 -- TODO: remove when genSMTCmds was moved
-import SMTLib.Types
-import SMTLib.Goodies
-import Symbolic (symInfo, SymInfo (..))
-import FCY2SMTLib (declConst, SMTInfo (..))
-import FiniteMap (foldFM)
+-- import SMTLib.Types
+-- import SMTLib.Goodies
+-- import Symbolic (symInfo, SymInfo (..))
+-- import FCY2SMTLib (declConst, SMTInfo (..))
+-- import FiniteMap (foldFM)
 
 main :: IO ()
 main = do
@@ -44,25 +45,22 @@ main = do
   callFrontendWithParams FCY params' (head files)
   status opts "Reading FlatCurry file(s)"
   prog@(AProg m _ _ _ _) <- readAnnFlatCurry (head files)
-  case hasMain prog of
+  case getMainBody prog of
     Nothing -> badUsage exec ["There is no main function in the given Curry file"]
-    Just ty -> do
+    Just  e -> do
       (ts, fs) <- getTysFuns m
-      status opts "Evaluating normal form of main"
+      status opts "Annotating case expressions with fresh identifiers"
       let (fs', v) = idCases fs
-          smtInfo  = fcy2SMT ts
-      info opts (pPrint $ text "Generated SMTLIB data:" <+> pretty smtInfo)
       info opts (pPrint $ text "Functions:" <+> ppFuncDecls (filter (isLocal m) fs'))
-      let (es, ss) = unzip $ ceval opts smtInfo fs' v (mainCall m ty)
-          smts     = map genSMTCmds ss
-      writeFile "generated.smt" (pPrint $ pretty $ head smts)
-      printExpr $ head es
-
--- mkOr :: AExpr TypeExpr -> AExpr TypeExpr -> AExpr TypeExpr
--- mkOr e1 e2 | e1 == failedExpr (annExpr e1) = e2
---            | e2 == failedExpr (annExpr e2) = e1
---            | otherwise                     = AOr (annExpr e1) e1 e2
-
+      status opts "Generating SMT-LIB declarations for FlatCurry types"
+      let smtInfo  = fcy2SMT ts
+      info opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
+      status opts "Beginning with concolic search"
+      testCases <- csearch opts fs' v smtInfo e
+      print testCases
+--           smts     = map genSMTCmds ss
+--       writeFile "generated.smt" (pPrint $ pretty $ head smts)
+--       printExpr res
 
 isLocal :: String -> AFuncDecl TypeExpr -> Bool
 isLocal m (AFunc qn _ _ _ _) = m == fst qn
@@ -84,19 +82,19 @@ getTysFuns mod = do
                (ts ++ mts, fs ++ mfs, m:ms)
                is
 
-genSMTCmds :: CEState -> SMTLib
-genSMTCmds state = SMTLib (tds ++ vds ++ pcs)
-  where
-    smtInfo = cesSMTInfo state
-    tds     = smtDecls smtInfo
-    vds     = foldFM (\vi ti cs -> declConst vi ti : cs) [] (smtVars smtInfo)
-    pcs     = genConstrs (map symInfo (cesTrace state))
-
-genConstrs :: [SymInfo] -> [Command]
-genConstrs [] = []
-genConstrs ((SymInfo _ vi t):sis)
-  | null sis  = [Assert (tvar vi /=% t), CheckSat, GetModel]
-  | otherwise = Assert (tvar vi =% t) : genConstrs sis
+-- genSMTCmds :: CEState -> SMTLib
+-- genSMTCmds state = SMTLib (tds ++ vds ++ pcs)
+--   where
+--     smtInfo = cesSMTInfo state
+--     tds     = smtDecls smtInfo
+--     vds     = foldFM (\vi ti cs -> declConst vi ti : cs) [] (smtVars smtInfo)
+--     pcs     = genConstrs (map symInfo (cesTrace state))
+--
+-- genConstrs :: [SymInfo] -> [Command]
+-- genConstrs [] = []
+-- genConstrs ((SymInfo _ vi t):sis)
+--   | null sis  = [Assert (tvar vi /=% t), CheckSat, GetModel]
+--   | otherwise = Assert (tvar vi =% t) : genConstrs sis
 
 -- TODO: Remove when there is support for reading annotated FlatCurry files
 -- in the libraries

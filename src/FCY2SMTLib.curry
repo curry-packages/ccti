@@ -10,15 +10,16 @@
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
-import Char            (toLower)
+import Char                          (toLower)
 import FiniteMap
-import FlatCurry.Types
-import List            (isPrefixOf)
+import FlatCurry.Annotated.Types
+import FlatCurry.Annotated.Goodies   (resultType)
+import List                          (isPrefixOf)
 
 import           Bimap
 import           FlatCurryGoodies    (prel)
 import           PrettyPrint
-import           SMTLib.Goodies      (var2SMT)
+import           SMTLib.Goodies      (qtcomb, tvar, tyVar, tyFun, tyComb, unqual)
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
 import           Utils               ((<$>), mapM)
@@ -75,8 +76,8 @@ data SMTTrans a = SMTTrans { runSMTTrans :: SMTInfo -> (a, SMTInfo) }
 instance Monad SMTTrans where
   return x = SMTTrans $ \s -> (x, s)
 
-  (SMTTrans f) >>= g = SMTTrans $ \s -> let (x, s') = f s
-                                        in  (runSMTTrans (g x)) s'
+  f >>= g = SMTTrans $ \s -> let (x, s') = runSMTTrans f s
+                             in  (runSMTTrans (g x)) s'
 
 modify :: (SMTInfo -> SMTInfo) -> SMTTrans ()
 modify f = SMTTrans $ \s -> ((), f s)
@@ -86,8 +87,12 @@ addSMTDecl :: SMT.Command -> SMTTrans ()
 addSMTDecl d = modify (\s -> s { smtDecls = d : smtDecls s })
 
 --- Lookup the SMT constructor for the given FlatCurry constructor
-lookupCons :: QName -> SMTInfo -> Maybe SMT.Ident
-lookupCons qn smtInfo = lookupBM qn (smtCMap smtInfo)
+lookupSMTCons :: QName -> SMTInfo -> Maybe SMT.Ident
+lookupSMTCons qn smtInfo = lookupBM qn (smtCMap smtInfo)
+
+--- Lookup the FlatCurry constructor for the given SMT constructor
+lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe QName
+lookupFCYCons i smtInfo = lookupBMR i (smtCMap smtInfo)
 
 --- Lookup the SMT type for the given FlatCurry type
 lookupType :: QName -> SMTInfo -> Maybe SMT.Ident
@@ -101,7 +106,7 @@ newSMTSort qn@(_, tc) = modify $ \smtInfo -> case lookupType qn smtInfo of
 
 --- Create an SMTLib constructor for the given FlatCurry constructor
 newSMTCons :: QName -> SMTTrans ()
-newSMTCons qn@(_, c) = modify $ \smtInfo -> case lookupCons qn smtInfo of
+newSMTCons qn@(_, c) = modify $ \smtInfo -> case lookupSMTCons qn smtInfo of
   Nothing -> smtInfo { smtCMap = addToBM qn (map toLower c) (smtCMap smtInfo) }
   Just _  -> smtInfo
 
@@ -143,9 +148,37 @@ ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
 ty2SMT (TCons qn@(_, tc) tys) =
   SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
 
---- generate a variable declaration in SMTLib
-declConst :: VarIndex -> TypeInfo -> SMT.Command
-declConst vi (TypeInfo _ s) = SMT.DeclareConst (var2SMT vi) s
+--- Transform a constructor expression into an SMTLib term
+toTerm :: SMTInfo -> (QName, TypeExpr) -> [VarIndex] -> SMT.Term
+toTerm smtInfo (qn, ty) vs = case lookupSMTCons qn smtInfo of
+  Nothing -> error $ "FCY2SMTLib.toTerm: No SMT-LIB representation for "
+               ++ show qn
+  Just c  -> qtcomb c (toSort smtInfo (resultType ty)) (map tvar vs)
+
+--- Transform an SMT-LIB term into a FlatCurry expression
+fromTerm :: SMTInfo -> SMT.Term -> AExpr TypeExpr
+fromTerm smtInfo t = case t of
+  SMT.TComb qi ts -> case lookupFCYCons (unqual qi) smtInfo of
+    Nothing -> error $ "FCY2SMTLib.fromTerm: No FCY representation for "
+      ++ show qi
+    Just qn -> AComb _ ConsCall (qn, _) (map (fromTerm smtInfo) ts)
+  _ -> error $ "FCY2SMTLib.fromTerm: " ++ show t
+
+--- Transform a literal into an SMTLib term
+-- toLitTerm :: Literal -> Term
+-- toLitTerm (Intc   i) = tint i
+-- toLitTerm (Floatc f) = tfloat f
+-- toLitTerm (Charc  c) = tchar c
+
+--- Transform a FlatCurry type expression into an SMTLib sort
+toSort :: SMTInfo -> TypeExpr -> SMT.Sort
+toSort _       (ForallType _ _) = error "FCY2SMT.toSort"
+toSort _       (TVar         _) = tyVar
+toSort _       (FuncType   _ _) = tyFun
+toSort smtInfo (TCons   qn tys) = case lookupType qn smtInfo of
+  Nothing -> error $ "Eval.toSort: No SMTLIB representation for type constructor "
+                 ++ show qn
+  Just tc -> tyComb tc (map (toSort smtInfo) tys)
 
 
 -- map predefined types and constructors to the corresponding SMTLib name

@@ -61,3 +61,27 @@ t1 =% t2 = tcomb "=" [t1, t2]
 --- smart constructor for an inequational SMT term
 (/=%) :: Term -> Term -> Term
 t1 /=% t2 = tcomb "not" [tcomb "=" [t1, t2]]
+
+--- smart constructor for conjunctions of constraints
+tand :: [Term] -> Term
+tand = tcomb "and"
+
+--- Constrain an SMT variable to be distinct from the given SMT terms
+noneOf :: VarIndex -> [Term] -> Term
+noneOf v cs = tand $ map (tvar v /=%) cs
+
+--- Generate a `nop` command
+nop :: Command
+nop = Echo ""
+
+--- Generate an `Assert` command for a given list of SMT terms
+assert :: [Term] -> Command
+assert ts = case ts of
+  []  -> nop
+  [t] -> Assert t
+  _   -> Assert $ tand ts
+
+--- Get the unqualified identifier of an `QIdent`
+unqual :: QIdent -> Ident
+unqual (Id   i) = i
+unqual (As i _) = i

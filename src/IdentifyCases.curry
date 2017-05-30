@@ -27,7 +27,7 @@ data ICM a = IC { runICM :: VarIndex -> (a, VarIndex) }
 instance Monad ICM where
   return x = IC $ \s -> (x, s)
 
-  (IC f) >>= g = IC $ \s -> let (x, s') = f s in (runICM (g x)) s'
+  f >>= g = IC $ \s -> let (x, s') = runICM f s in (runICM (g x)) s'
 
 get :: ICM VarIndex
 get = IC $ \s -> (s, s)

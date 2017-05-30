@@ -11,17 +11,11 @@ import FlatCurry.Annotated.Goodies
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
 
--- TODO: remove and provide access to cmap tmap via functions in FCY2SMTLib ?
-
 import CCTOptions                  (CCTOpts (..))
-import FCY2SMTLib                  ( SMTInfo (..), addTypeInfo, lookupCons
-                                   , lookupType)
 import FlatCurryGoodies
 import Heap
 import Output                      (traceDebug, traceInfo)
 import PrettyPrint hiding          (combine)
-import SMTLib.Goodies
-import SMTLib.Types                (Sort, Term)
 import Substitution
 import Symbolic
 import Utils
@@ -46,26 +40,26 @@ data Result a
 ---   * the current ccti options,
 ---   * the concrete heap containing variable bindings,
 ---   * a list of all defined function declarations,
----   * SMT representations of FlatCurry types and constructors,
 ---   * an index for fresh variables,
+---   * the argument variables of the function which is concolically tested
 ---   * a trace of symbolic information for case branches.
 data CEState = CEState
   { cesCCTOpts :: CCTOpts
   , cesHeap    :: Heap
   , cesFuncs   :: [AFuncDecl TypeExpr]
-  , cesSMTInfo :: SMTInfo
   , cesFresh   :: VarIndex
+  , cesArgs    :: [VarIndex]
   , cesTrace   :: Trace
   }
 
 --- Initial state for concolic evaluation
-initState :: CCTOpts -> SMTInfo -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
-initState opts smtInfo fs v = CEState
+initState :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
+initState opts fs v = CEState
   { cesCCTOpts = opts
   , cesHeap    = emptyH
   , cesFuncs   = fs
-  , cesSMTInfo = smtInfo
   , cesFresh   = v
+  , cesArgs    = []
   , cesTrace   = []
   }
 
@@ -89,9 +83,6 @@ traceSym s = traceInfo (cesCCTOpts s)
 --- Concolic evaluation monad
 data CEM a = CE { runCEM :: CEState -> Result (a, CEState) }
 
-runState :: CEM a -> CEState -> Result (a, CEState)
-runState (CE f) s = f s
-
 --- Monadic bind operation.
 bindResult :: Result a -> (a -> Result b) -> Result b
 bindResult (Return   x) f = f x
@@ -100,10 +91,10 @@ bindResult (Choice a b) f = Choice (bindResult a f) (bindResult b f)
 instance Monad CEM where
   return x = CE $ \s -> Return (x, s)
 
-  (CE f) >>= g = CE $ \s -> bindResult (f s) (\(x, s') -> runState (g x) s')
+  f >>= g = CE $ \s -> bindResult (runCEM f s) (\(x, s') -> runCEM (g x) s')
 
 choice :: CEM a -> CEM a -> CEM a
-choice x y = CE $ \s -> Choice (runState x s) (runState y s)
+choice x y = CE $ \s -> Choice (runCEM x s) (runCEM y s)
 
 gets :: (CEState -> a) -> CEM a
 gets f = CE $ \s -> Return (f s, s)
@@ -202,64 +193,48 @@ freshVars n = sequence $ replicate n freshVar
 
 --- ----------------------------------------------------------------------------
 
+--- Store the argument variables of the flattened main expression
+setMainArgs :: [VarIndex] -> CEM ()
+setMainArgs vs = modify $ \s -> s { cesArgs = vs }
+
+--- ----------------------------------------------------------------------------
+
 --- Get the trace of symbolic information
 getTrace :: CEM Trace
 getTrace = gets cesTrace
 
---- Get the SMTLIB information
-getSMTInfo :: CEM SMTInfo
-getSMTInfo = gets cesSMTInfo
-
---- Transform a constructor expression into an SMTLib term
-toTerm :: (QName, TypeExpr) -> [VarIndex] -> CEM Term
-toTerm (qn, ty) vs = do
-  smtInfo <- getSMTInfo
-  s       <- toSort (resultType ty)
-  case lookupCons qn smtInfo of
-    Nothing -> error $ "Eval.toTerm: No SMTLIB representation for constructor "
-                 ++ show qn
-    Just c  -> return $ qtcomb c s (map tvar vs)
-
---- Transform a literal into an SMTLib term
-toLitTerm :: Literal -> Term
-toLitTerm (Intc   i) = tint i
-toLitTerm (Floatc f) = tfloat f
-toLitTerm (Charc  c) = tchar c
-
-toSort :: TypeExpr -> CEM Sort
-toSort (ForallType _ _) = error "Eval.toSort"
-toSort (TVar       _) = return tyVar
-toSort (FuncType _ _) = return tyFun
-toSort (TCons qn tys) = do
-  smtInfo <- getSMTInfo
-  case lookupType qn smtInfo of
-    Nothing -> error $ "Eval.toSort: No SMTLIB representation for type constructor "
-                 ++ show qn
-    Just tc -> tyComb tc <$> mapM toSort tys
-
-addSMTVarDecl :: VarIndex -> TypeExpr -> CEM ()
-addSMTVarDecl vi ty = do
-  state <- get
-  s     <- toSort ty
-  put state { cesSMTInfo = addTypeInfo vi ty s (cesSMTInfo state) }
-
 --- Add a decision with symbolic information for case expression `cid` to the trace
-mkDecision :: VarIndex -> SymInfo -> CEM ()
-mkDecision cid info = modify (\s -> s { cesTrace = (cid :>: info) : cesTrace s })
+mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeExpr) -> [VarIndex]
+           -> CEM ()
+mkDecision cid bnr v cty args
+  = modify (\s -> s { cesTrace = (Decision cid bnr v cty args) : cesTrace s })
 
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: CCTOpts -> SMTInfo -> [AFuncDecl TypeExpr] -> VarIndex
-      -> AExpr TypeExpr -> [(AExpr TypeExpr, CEState)]
-ceval opts smtInfo fs v e
-  = fromResult $ runState (nf e) (initState opts smtInfo fs v)
+ceval :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
+      -> (AExpr TypeExpr, [Trace], [VarIndex], VarIndex)
+ceval opts fs v e = fromResult $ runCEM (flatten e >>= nf) (initState opts fs v)
+  where
+  --- Flatten a FlatCurry function call introducing fresh variables for
+  --- its arguments
+  --- Note: This function should only used to 'prepare' the main expression
+  --- before concolic testing
+  flatten :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+  flatten exp = case exp of
+    AComb ty FuncCall c es -> do
+      vs <- mapM bindArg es
+      setMainArgs (map varNr vs)
+      return $ AComb ty FuncCall c vs
+    _                      -> return exp
 
-fromResult :: Result (AExpr TypeExpr, CEState) -> [(AExpr TypeExpr, CEState)]
-fromResult (Return (e, s))
-  | e == failedExpr (annExpr e) = []
-  | otherwise                   = traceSym s [(e, s)]
-fromResult (Choice       e1 e2) = fromResult e1 ++ fromResult e2
+fromResult :: Result (AExpr TypeExpr, CEState)
+           -> (AExpr TypeExpr, [Trace], [VarIndex], VarIndex)
+fromResult (Return (e, s)) = traceSym s
+  (e, [reverse $ cesTrace s], cesArgs s, cesFresh s)
+fromResult (Choice  e1 e2) = let (r1, t1, args, v1) = fromResult e1
+                                 (r2, t2, _   , v2) = fromResult e2
+                             in (mkOr r1 r2, t1 ++ t2, args, min v1 v2)
 
 --- Evaluate given FlatCurry expression to normal form
 nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -370,18 +345,11 @@ hnfCase ct e bs = do
   hnf ve >>= \v -> case v of
     ALit ty l -> case findBranch (ALPattern ty l) bs of
       Nothing          -> failS ty
-      Just (n, _,  be) -> do
-        addSMTVarDecl vi ty
-        mkDecision cid (SymInfo (BNr n bcnt) vi (toLitTerm l))
-        hnf be
-    AComb ty ConsCall c@(_, cty) es -> case findBranch (APattern ty c []) bs of
+      Just (_, _,  be) -> hnf be
+    AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        let ys = map varNr es
-        -- add smtlib declarations for all variables
-        zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
-        t <- toTerm c ys
-        mkDecision cid (SymInfo (BNr n bcnt) vi t)
+        mkDecision cid (BNr n bcnt) vi c (map varNr es)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -392,16 +360,12 @@ hnfCase ct e bs = do
       where
         narrowCase = foldr choice (failS ty) $ zipWith guess [1 ..] bs
 
-        guess n (ABranch (ALPattern  ty' l) be) = do
-          addSMTVarDecl vi ty'
-          mkDecision cid (SymInfo (BNr n bcnt) vi (toLitTerm l))
+        guess _ (ABranch (ALPattern  ty' l) be) = do
           bindE i (ALit ty' l)
           hnf be
-        guess n (ABranch (APattern ty' c@(_, cty) txs) be) = do
+        guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
-          zipWithM_ addSMTVarDecl (ys ++ [vi]) (getTypes cty)
-          t   <- toTerm c ys
-          mkDecision cid (SymInfo (BNr n bcnt) vi t)
+          mkDecision cid (BNr n bcnt) vi c ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')

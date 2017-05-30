@@ -23,6 +23,13 @@ prel f = ("Prelude", f)
 failedExpr :: TypeExpr -> AExpr TypeExpr
 failedExpr ty = AComb ty FuncCall ((prel "failed"), ty) []
 
+--- smart constructor for a nondeterministic choice in FlatCurry
+mkOr :: AExpr TypeExpr -> AExpr TypeExpr -> AExpr TypeExpr
+mkOr e1 e2 | e1 == failedExpr ty = e2
+           | e2 == failedExpr ty = e1
+           | otherwise           = AOr ty e1 e2
+  where ty = annExpr e1
+
 --- Annotated FlatCurry type expression representing `Bool`
 boolType :: TypeExpr
 boolType = TCons (prel "Bool") []
@@ -146,9 +153,13 @@ combine amp uni def es1 es2
   eqs                = zipWith (mkCall unifyType uni) es1 es2
   mkCall tc qn e1 e2 = AComb boolType FuncCall (qn, tc (annExpr e1)) [e1, e2]
 
---- Get the type of the main function for the given FlatCurry program
-hasMain :: AProg a -> Maybe TypeExpr
-hasMain (AProg m _ _ fs _) = findFunc (m, "main") fs >>= return . funcType
+--- Get the rhs expression of the main function of the given FlatCurry program
+getMainBody :: AProg a -> Maybe (AExpr a)
+getMainBody (AProg m _ _ fs _) = findFunc (m, "main") fs >>= return . funcBody
+
+--- Replace the arguments in a FlatCurry function call with the given expressions
+replArgs :: AExpr a -> [AExpr a] -> AExpr a
+replArgs e args = updCombs (\ann ct c _ -> AComb ann ct c args) e
 
 --- Generate a call of the main function of the given module
 mainCall :: String -> TypeExpr -> AExpr TypeExpr
