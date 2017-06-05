@@ -1,6 +1,7 @@
 module PriorityQueue where
 
 import FiniteMap
+import Utils
 
 type PQueue a b = FM a [b]
 
@@ -23,7 +24,3 @@ rmvElem k pq = case lookupFM pq k of
   Just vs | length vs <= 1 -> delFromFM pq k
           | otherwise      -> updFM pq k tail
 
--- TODO: Remove when there is a functor instance for Maybe
-instance Functor Maybe where
-  fmap _ Nothing  = Nothing
-  fmap f (Just x) = Just (f x)

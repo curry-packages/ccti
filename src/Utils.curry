@@ -41,3 +41,8 @@ rpad n str = str ++ replicate (n - length str) ' '
 --- swap the components of a tuple
 swap :: (a, b) -> (b, a)
 swap (x, y) = (y, x)
+
+-- TODO: Remove when there is a functor instance for Maybe
+instance Functor Maybe where
+  fmap _ Nothing  = Nothing
+  fmap f (Just x) = Just (f x)
