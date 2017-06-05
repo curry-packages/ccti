@@ -44,11 +44,11 @@ qtcomb i s ts = TComb (As i s) ts
 
 --- smart constructor for a sort representing type variables
 tyVar :: Sort
-tyVar = SComb "_TVar" []
+tyVar = SComb "TVar" []
 
 --- smart constructor for a sort representing a functional type
 tyFun :: Sort
-tyFun = SComb "_Fun" []
+tyFun = SComb "Fun" []
 
 --- smart constructor for sorts
 tyComb :: Ident -> [Sort] -> Sort

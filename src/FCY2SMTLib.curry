@@ -6,44 +6,61 @@
 --- versa.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
 import Char                          (toLower)
 import FiniteMap
 import FlatCurry.Annotated.Types
-import FlatCurry.Annotated.Goodies   (resultType)
+import FlatCurry.Annotated.Goodies   (argTypes, resultType)
 import List                          (isPrefixOf)
 
 import           Bimap
-import           FlatCurryGoodies    (prel)
+import           FlatCurryGoodies
 import           PrettyPrint
-import           SMTLib.Goodies      (qtcomb, tvar, tyVar, tyFun, tyComb, unqual)
+import           SMTLib.Goodies      ( qtcomb, tvar, tyVar, tyFun, tyComb
+                                     , unqual, var2SMT
+                                     )
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
+import           Substitution        (substTy, unify)
 import           Utils               ((<$>), mapM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa
-type ConsMap = BM QName SMT.Ident
+type ConsMap = BM TypedFCYCons SMT.Ident
 
 --- Bidirectional type map
 --- mapping FlatCurry types to SMTLib sorts and vice versa
 type TypeMap = BM QName SMT.Ident
 
---- Variable map storing type information (FlatCurry type, SMT sort) for
---- SMT variables
-type VarMap = FM VarIndex TypeInfo
+--- Type environment storing type information for SMT-LIB variables
+type TypeEnv = FM VarIndex TypeInfo
 
-data TypeInfo = TypeInfo { fcType :: TypeExpr, smtSort :: SMT.Sort }
+data TypeInfo = TypeInfo
+  { fcType  :: TypeExpr
+  , smtSort :: SMT.Sort
+  , args    :: [VarIndex]
+  }
+ deriving Show
 
 instance Pretty TypeInfo where
-  pretty (TypeInfo ty s) = tupled [ppTypeExp ty, pretty s]
+  pretty (TypeInfo ty s args) =
+    braces (ppTypeExp ty <+> pretty s <+> list (map ppVarIndex args))
+
+--- Generate a new TypeInfo object
+newTypeInfo :: SMTInfo -> TypeExpr -> [VarIndex] -> TypeInfo
+newTypeInfo smtInfo ty args = TypeInfo ty (toSort smtInfo ty) args
+
+--- Generate a variable declaration in SMT-LIB
+declConst :: VarIndex -> TypeInfo -> SMT.Command
+declConst vi (TypeInfo _ s _) = SMT.DeclareConst (var2SMT vi) s
+
 
 data SMTInfo = SMTInfo
   { smtDecls :: [SMT.Command]
-  , smtVars  :: VarMap
+  , smtVars  :: TypeEnv
   , smtTMap  :: TypeMap
   , smtCMap  :: ConsMap
   }
@@ -64,11 +81,10 @@ instance Pretty SMTInfo where
     , text "Var Map: Mapping SMT variables to FlatCurry types and SMTLib sorts"
     , ppFM (\(k, v) -> ppVarIndex k <+> text "\x27f6" <+> pretty v) vmap
     , text "Type Map: Mapping FlatCurry types to SMT sorts"
-    , ppBM ppEntry tmap
+    , ppBM (\(k, v) -> ppQName k <+> text "\x27f7" <+> text v) tmap
     , text "Constructor Map: Mapping FlatCurry constructors to SMT constructors"
-    , ppBM ppEntry cmap
+    , ppBM (\(k, v) -> pretty k <+>  text "\x27f7" <+> text v) cmap
     ]
-    where ppEntry (k, v) = ppQName k <+> text "\x27f7" <+> text v
 
 --- SMT transformation monad
 data SMTTrans a = SMTTrans { runSMTTrans :: SMTInfo -> (a, SMTInfo) }
@@ -87,16 +103,20 @@ addSMTDecl :: SMT.Command -> SMTTrans ()
 addSMTDecl d = modify (\s -> s { smtDecls = d : smtDecls s })
 
 --- Lookup the SMT constructor for the given FlatCurry constructor
-lookupSMTCons :: QName -> SMTInfo -> Maybe SMT.Ident
-lookupSMTCons qn smtInfo = lookupBM qn (smtCMap smtInfo)
+lookupSMTCons :: TypedFCYCons -> SMTInfo -> Maybe SMT.Ident
+lookupSMTCons tqn smtInfo = lookupBM tqn (smtCMap smtInfo)
 
 --- Lookup the FlatCurry constructor for the given SMT constructor
-lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe QName
+lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe TypedFCYCons
 lookupFCYCons i smtInfo = lookupBMR i (smtCMap smtInfo)
 
 --- Lookup the SMT type for the given FlatCurry type
 lookupType :: QName -> SMTInfo -> Maybe SMT.Ident
 lookupType qn smtInfo = lookupBM qn (smtTMap smtInfo)
+
+--- Get type information and the arguments for the given SMT-LIB variable
+getFCYType :: VarIndex -> SMTInfo -> Maybe TypeExpr
+getFCYType vi smtInfo = fmap fcType (lookupFM (smtVars smtInfo) vi)
 
 --- Create an SMTLib sort representation for the given FlatCurry type
 newSMTSort :: QName -> SMTTrans ()
@@ -104,21 +124,13 @@ newSMTSort qn@(_, tc) = modify $ \smtInfo -> case lookupType qn smtInfo of
   Nothing -> smtInfo { smtTMap = addToBM qn tc (smtTMap smtInfo) }
   Just _  -> smtInfo
 
---- Create an SMTLib constructor for the given FlatCurry constructor
-newSMTCons :: QName -> SMTTrans ()
-newSMTCons qn@(_, c) = modify $ \smtInfo -> case lookupSMTCons qn smtInfo of
-  Nothing -> smtInfo { smtCMap = addToBM qn (map toLower c) (smtCMap smtInfo) }
-  Just _  -> smtInfo
-
---- Add type information (FlatCurry type, SMTLib sort) for given variable
-addTypeInfo :: VarIndex -> TypeExpr -> SMT.Sort -> SMTInfo -> SMTInfo
-addTypeInfo vi ty s smtInfo
-  = smtInfo { smtVars = addToFM_C specialize (smtVars smtInfo) vi (TypeInfo ty s) }
-  where
-    -- specialize type information
-    specialize old new = case old of
-      (TypeInfo (TVar _) _) -> new
-      _                     -> old
+--- Create an SMTLib constructor for the given typed FlatCurry constructor
+newSMTCons :: TypedFCYCons -> SMTTrans ()
+newSMTCons tqn@(TFCYCons qn _) = modify $
+  \smtInfo -> case lookupSMTCons tqn smtInfo of
+    Nothing ->
+      smtInfo { smtCMap = addToBM tqn (map toLower (snd qn)) (smtCMap smtInfo) }
+    Just _  -> smtInfo
 
 fcy2SMT :: [TypeDecl] -> SMTInfo
 fcy2SMT ts = snd $ (runSMTTrans $ mapM tdecl2SMT ts) initSMTInfo
@@ -128,17 +140,18 @@ tdecl2SMT td = case td of
   Type qn@(_, t) _ tvs cs
     | not $ any (`isPrefixOf` t) ignoredTypes -> do
         newSMTSort qn
-        cs' <- mapM cdecl2SMT cs
+        cs' <- mapM (cdecl2SMT (TCons qn (map TVar tvs))) cs
         return ()
         addSMTDecl (SMT.DeclareDatatypes (map (typeVars !!) tvs)
           (lookupWithDefaultBM t qn predefTypes) cs')
   _                                        -> return ()
 
-cdecl2SMT :: ConsDecl -> SMTTrans SMT.ConsDecl
-cdecl2SMT (Cons qn@(_, c) _ _ tys) = do
-  newSMTCons qn
+cdecl2SMT :: TypeExpr -> ConsDecl -> SMTTrans SMT.ConsDecl
+cdecl2SMT rty (Cons qn@(_, c) _ _ tys) = do
+  let tqn = TFCYCons qn (mkFunType tys rty)
+  newSMTCons tqn
   tys' <- mapM ty2SMT tys
-  let c' = map toLower (lookupWithDefaultBM c qn predefCons)
+  let c' = lookupWithDefaultBM (map toLower c) tqn predefCons
   return $ SMT.Cons c' (zipWith SMT.SV (map (\n -> c' ++ '_' : show n) [1..]) tys')
 
 ty2SMT :: TypeExpr -> SMTTrans SMT.Sort
@@ -149,26 +162,30 @@ ty2SMT (TCons qn@(_, tc) tys) =
   SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
 
 --- Transform a constructor expression into an SMTLib term
-toTerm :: SMTInfo -> (QName, TypeExpr) -> [VarIndex] -> SMT.Term
-toTerm smtInfo (qn, ty) vs = case lookupSMTCons qn smtInfo of
+toTerm :: SMTInfo -> TypedFCYCons -> [VarIndex] -> SMT.Term
+toTerm smtInfo tqn@(TFCYCons qn ty) vs = case lookupSMTCons tqn smtInfo of
   Nothing -> error $ "FCY2SMTLib.toTerm: No SMT-LIB representation for "
                ++ show qn
   Just c  -> qtcomb c (toSort smtInfo (resultType ty)) (map tvar vs)
 
 --- Transform an SMT-LIB term into a FlatCurry expression
-fromTerm :: SMTInfo -> SMT.Term -> AExpr TypeExpr
-fromTerm smtInfo t = case t of
-  SMT.TComb qi ts -> case lookupFCYCons (unqual qi) smtInfo of
-    Nothing -> error $ "FCY2SMTLib.fromTerm: No FCY representation for "
-      ++ show qi
-    Just qn -> AComb _ ConsCall (qn, _) (map (fromTerm smtInfo) ts)
-  _ -> error $ "FCY2SMTLib.fromTerm: " ++ show t
-
---- Transform a literal into an SMTLib term
--- toLitTerm :: Literal -> Term
--- toLitTerm (Intc   i) = tint i
--- toLitTerm (Floatc f) = tfloat f
--- toLitTerm (Charc  c) = tchar c
+fromTerm :: SMTInfo -> VarIndex -> SMT.Term -> AExpr TypeExpr
+fromTerm smtInfo vi t = case getFCYType vi smtInfo of
+  Nothing -> error $ "FCY2SMTLib.fromTerm: No type information for "
+    ++ show vi
+  Just ty -> fromTerm' ty t
+ where
+  fromTerm' rty t' = case t' of
+    SMT.TComb qi ts
+      | i == "tvar" -> unit
+      | otherwise   -> case lookupFCYCons i smtInfo of
+        Nothing       -> error $ "FCY2SMTLib.fromTerm: No FCY representation for "
+          ++ show qi
+        Just (TFCYCons qn ty) ->
+          let ty' = substTy (unify [(resultType ty, rty)]) ty
+          in AComb rty ConsCall (qn, ty') (zipWith fromTerm' (argTypes ty') ts)
+      where i = unqual qi
+    _ -> error $ "FCY2SMTLib.fromTerm: " ++ show t
 
 --- Transform a FlatCurry type expression into an SMTLib sort
 toSort :: SMTInfo -> TypeExpr -> SMT.Sort
@@ -214,15 +231,27 @@ predefTypes = listToBM (<) (<) $ map qualPrel
   ]
 
 --- predefined constructors
-predefCons :: BM QName SMT.Ident
-predefCons = listToBM (<) (<) $ map qualPrel
-  [ ("False","false"), ("True","true"), ("[]","nil"), (":","insert")
-  , ("()","unit"), ("(,)","tuple2"), ("(,,)","tuple3")
-  , ("(,,,)","tuple4"), ("(,,,,)","tuple5"), ("(,,,,,)","tuple6")
-  , ("(,,,,,,)","tuple7"), ("(,,,,,,,)","tuple8"), ("(,,,,,,,,)","tuple9")
-  , ("(,,,,,,,,,)","tuple10"), ("(,,,,,,,,,,)","tuple11")
-  , ("(,,,,,,,,,,,)","tuple12"), ("(,,,,,,,,,,,,)","tuple13")
-  , ("(,,,,,,,,,,,,,)","tuple14"), ("(,,,,,,,,,,,,,,)","tuple15")
+predefCons :: BM TypedFCYCons SMT.Ident
+predefCons = listToBM (<) (<) $
+  [ (prelTFCYCons "False" boolType,"false")
+  , (prelTFCYCons "True"  boolType,"true")
+  , (prelTFCYCons "[]" (listType (TVar 0)),"nil")
+  , (prelTFCYCons ":" (mkFunType [TVar 0, listType (TVar 0)] (listType (TVar 0))),"insert")
+  , (prelTFCYCons "()" unitType,"unit")
+  , (mkTplType "(,)"               2,"tuple2")
+  , (mkTplType "(,,)"              3,"tuple3")
+  , (mkTplType "(,,,)"             4,"tuple4")
+  , (mkTplType "(,,,,)"            5,"tuple5")
+  , (mkTplType "(,,,,,)"           6,"tuple6")
+  , (mkTplType "(,,,,,,)"          7,"tuple7")
+  , (mkTplType "(,,,,,,,)"         8,"tuple8")
+  , (mkTplType "(,,,,,,,,)"        9,"tuple9")
+  , (mkTplType "(,,,,,,,,,)"      10,"tuple10")
+  , (mkTplType "(,,,,,,,,,,)"     11,"tuple11")
+  , (mkTplType "(,,,,,,,,,,,)"    12,"tuple12")
+  , (mkTplType "(,,,,,,,,,,,,)"   13,"tuple13")
+  , (mkTplType "(,,,,,,,,,,,,,)"  14,"tuple14")
+  , (mkTplType "(,,,,,,,,,,,,,,)" 15,"tuple15")
   ]
 
 --- data types which are ignored regarding the generation of SMT data type declarations
@@ -231,11 +260,11 @@ ignoredTypes =  ["Bool", "Int", "Float", "Char", "_Dict", "IO", "[]", "(->)"]
 
 --- Sort to represent polymorphism in SMTLib
 tvarDecl :: SMT.Command
-tvarDecl = SMT.DeclareDatatypes [] "_TVar" [SMT.Cons "_tvar" []]
+tvarDecl = SMT.DeclareDatatypes [] "TVar" [SMT.Cons "tvar" []]
 
 --- Sort to represent functional types in SMTLib
 funDecl :: SMT.Command
-funDecl = SMT.DeclareDatatypes [] "_Fun" [SMT.Cons "_fun" []]
+funDecl = SMT.DeclareDatatypes [] "Fun" [SMT.Cons "fun" []]
 
 -- helper
 -- qualify first component of a tuple with "Prelude"

@@ -15,7 +15,7 @@ nextNode = getElem
 
 --- Add a node to given symbolic tree
 addNode :: SymNode -> SymTree -> SymTree
-addNode n@(SymNode d _ _ _ _) t = addElem d n t
+addNode n@(SymNode d _ _ _ _ _) t = addElem d n t
 
 --- Delete a node in the given symbolic tree
 delNode :: Depth -> SymTree -> SymTree

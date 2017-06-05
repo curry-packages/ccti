@@ -12,6 +12,7 @@ import IO
 import IOExts                        (execCmd)
 
 import           PrettyPrint
+import           SMTLib.Goodies      (tyComb, tyVar)
 import           SMTLib.Parser       (parseCmdRsps)
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
@@ -32,8 +33,8 @@ instance Pretty Result where
   pretty Unsat        = text "unsat"
   pretty Unknown      = text "unknown"
   pretty Sat          = text "sat"
-  pretty (Model    _) = text "model"
-  pretty (Values   _) = text "valuation pair"
+  pretty (Model   ms) = parent (map pretty ms)
+  pretty (Values vps) = parent (map ppValPair vps)
 
 --- error messages
 data Message = SolverError String
@@ -135,33 +136,6 @@ getValues s ts = do
     Right rsps                -> return $ errorMsgs rsps
 
 
---- Check for syntactic errors, if the model is satisfiable and compute model
--- checkNSolve :: SolverSession -> IO Result
--- checkNSolve s = do
---   sendCmds s []
---   errMsg <- getDelimited s
---   -- check for syntactic errors, type mismatches etc.
---   case parseCmdRsps errMsg of
---     Left  msg  -> return $ parserError msg
---     Right rs | not (null rs) -> return $ errorMsgs rs
---              | otherwise     -> do
---       sendCmds s [SMT.CheckSat]
---       satMsg <- getDelimited s
---       -- check satisfiability
---       case parseCmdRsps satMsg of
---         Left msg -> return $ parserError msg
---         Right [SMT.CheckSatRsp SMT.Unknown] -> return Unknown
---         Right [SMT.CheckSatRsp SMT.Unsat]   -> return Unsat
---         Right [SMT.CheckSatRsp SMT.Sat]     -> do
---           sendCmds s [SMT.GetModel]
---           modelMsg <- getDelimited s
---           -- compute model
---           case parseCmdRsps modelMsg of
---             Left  msg                 -> return $ parserError msg
---             Right [SMT.GetModelRsp m] -> return $ Sat m
---             Right rsps                -> return $ errorMsgs rsps
---         Right rsps -> return $ errorMsgs rsps
-
 --- Add delimiter to stdout via echo command in order to read answers successively
 --- and send commands to solver
 sendCmds :: SolverSession -> [SMT.Command] -> IO ()
@@ -170,6 +144,13 @@ sendCmds s@(sin, _, _) cmds = addCmds s (cmds ++ [SMT.Echo delim]) >> hFlush sin
 --- Get the contents of stdout of a solver session up to the delimiter "END-OF-ANSWER"
 getDelimited :: SolverSession -> IO String
 getDelimited (_, sout, _) = hGetUntil sout delim
+
+--- SMT-LIB commands to initialize first constraint scope
+-- Note: Due to a bug of Z3, we have to declare an arbitrary SMT-LIB variable of
+-- the predefined list datatype. Otherwise the constructors of the list type
+-- are no longer visible after executing the first pop command
+initScopeCmds :: [SMT.Command]
+initScopeCmds = [SMT.DeclareConst "l42" (tyComb "List" [tyVar]), SMT.Push 1]
 
 -- helper
 

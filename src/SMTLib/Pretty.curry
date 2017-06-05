@@ -238,7 +238,9 @@ instance Pretty CmdResponse where
   pretty (GetUnsatAssumptionsRsp syms) = parent (map text syms)
   pretty (GetUnsatCoreRsp        syms) = parent (map text syms)
   pretty (GetValueRsp              vs) = parent (map ppValPair vs)
-    where ppValPair (t1, t2) = parent [pretty t1, pretty t2]
+
+ppValPair :: ValuationPair -> Doc
+ppValPair (t1, t2) = parent [pretty t1, pretty t2]
 
 instance Pretty CheckSat where
   pretty Sat     = text "sat"

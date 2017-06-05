@@ -57,10 +57,7 @@ main = do
       info opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
       status opts "Beginning with concolic search"
       testCases <- csearch opts fs' v smtInfo e
-      print testCases
---           smts     = map genSMTCmds ss
---       writeFile "generated.smt" (pPrint $ pretty $ head smts)
---       printExpr res
+      putStr $ pPrint $ vsep $ map ppTestCase testCases
 
 isLocal :: String -> AFuncDecl TypeExpr -> Bool
 isLocal m (AFunc qn _ _ _ _) = m == fst qn
