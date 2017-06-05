@@ -106,12 +106,6 @@ keysBM (BM fm1 _) = keysFM fm1
 eltsBM :: BM a b -> [b]
 eltsBM (BM fm1 _) = eltsFM fm1
 
--- Pretty printing of bidirectional maps
-
---- Pretty print finite map
-ppFM :: ((a, b) -> Doc) -> FM a b -> Doc
-ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
-
 --- Pretty print bidirectional map
 ppBM :: ((a, b) -> Doc) -> BM a b -> Doc
 ppBM ppEntry (BM fm _) = ppFM ppEntry fm

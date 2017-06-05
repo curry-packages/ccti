@@ -9,7 +9,9 @@ module PrettyPrint ( module FlatCurry.Annotated.Pretty
                    , module Pretty
                    , module PrettyPrint) where
 
+import FiniteMap                         (FM, fmToList)
 import FlatCurry.Annotated.Pretty hiding (indent)
+import FlatCurry.Annotated.Types
 import Pretty                     hiding (pretty)
 
 class Pretty a where
@@ -18,3 +20,12 @@ class Pretty a where
 --- Pretty print the given documents separated with spaces and parenthesized
 parent :: [Doc] -> Doc
 parent = encloseSep lparen rparen space
+
+--- Pretty print finite map
+ppFM :: ((a, b) -> Doc) -> FM a b -> Doc
+ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
+
+--- Pretty printing of test cases
+ppTestCase :: (AExpr TypeExpr, AExpr TypeExpr) -> Doc
+ppTestCase (e1, e2) = parens (ppExp e1 <+> equals <+> ppExp e2)
+
