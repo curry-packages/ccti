@@ -31,8 +31,9 @@ type UVNodes = FM CaseID CaseInfo
 data CaseInfo = CaseInfo [Int] [Term] [Command]
   deriving Show
 
---- Test case data: function call with arguments and corresponding result
-type TestCase = (AExpr TypeExpr, AExpr TypeExpr)
+--- Test case data: function call with arguments and corresponding
+--- non-deterministic results
+type TestCase = (AExpr TypeExpr, [AExpr TypeExpr])
 
 data CSState = CSState
   { cssCCTOpts :: CCTOpts
@@ -186,18 +187,16 @@ searchLoop fs v sub sexp = do
   let cexp = substExp sub sexp
       (res, ts, v') = ceval opts fs v cexp
       tcase = (cexp, res)
-  io $ status opts $ "Found test case: " ++ pPrint (ppTestCase tcase)
+  io $ debugSearch opts $ "Found test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
   mapM_ updSymInfo ts
---   smtInfo <- getSMTInfo
   st  <- getSymTree
-  io $ debug opts $ "Priority Queue: " ++ pPrint (ppFM (\(_,n) -> text (show n)) st)
---   io $ debug opts $ "Type Info: " ++ pPrint (pretty smtInfo)
+  io $ debugSearch opts $ "Priority Queue: " ++ pPrint (ppFM (\(_,n) -> text (show n)) st)
   nxt <- nextSymNode st
   case nxt of
     Nothing -> return ()
     Just  n -> do
-      io $ status opts $ "Next node: " ++ show n
+      io $ debugSearch opts $ "Next node: " ++ show n
       cmds    <- genSMTCmds n
       session <- getSession
       msub    <- solve session (getSMTArgs n sub) cmds
@@ -245,16 +244,17 @@ solve s vs cmds = do
     resetStack s
     -- add constraints to solver stack
     addCmds s cmds
-    debug opts $ "SMT-LIB model: " ++ pPrint (pretty (SMTLib cmds))
+    putStrLn $ "\n\nvariables " ++ show vs
+    debugSearch opts $ "SMT-LIB model:\n" ++ pPrint (pretty (SMTLib cmds))
     -- check satisfiability
     isSat <- checkSat s
-    debug opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
+    debugSearch opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
     case isSat of
       Sat -> do
         vals <- getValues s (map tvar vs)
-        debug opts $ "Get values: " ++ pPrint (pretty vals)
+        debugSearch opts $ "Get values: " ++ pPrint (pretty vals)
         case vals of
           Values vps -> return $ Just $ mkSubst vs $
                           zipWith (fromTerm smtInfo) vs (map snd vps)
-          r          -> debug opts (pPrint (pretty r)) >> return Nothing
-      r   -> debug opts (pPrint (pretty r)) >> return Nothing
+          _          -> return Nothing
+      _   -> return Nothing

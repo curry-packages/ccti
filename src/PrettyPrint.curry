@@ -26,6 +26,6 @@ ppFM :: ((a, b) -> Doc) -> FM a b -> Doc
 ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
 
 --- Pretty printing of test cases
-ppTestCase :: (AExpr TypeExpr, AExpr TypeExpr) -> Doc
-ppTestCase (e1, e2) = parens (ppExp e1 <+> equals <+> ppExp e2)
+ppTestCase :: (AExpr TypeExpr, [AExpr TypeExpr]) -> Doc
+ppTestCase (e, res) = parens (ppExp e <+> equals <+> list (map ppExp res))
 

@@ -17,7 +17,6 @@ import ReadShowTerm              (readUnqualifiedTerm)
 import System                    (exitWith, getProgName)
 
 import CCTOptions                (CCTOpts (..), badUsage, getOpts)
--- import Eval                      (ceval, CEState (..))
 import FCY2SMTLib                (fcy2SMT)
 import FlatCurryGoodies          (getMainBody, printExpr)
 import IdentifyCases             (idCases)

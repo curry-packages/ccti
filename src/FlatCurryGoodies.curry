@@ -202,60 +202,60 @@ mainCall :: String -> TypeExpr -> AExpr TypeExpr
 mainCall m ty = AComb (resultType ty) FuncCall ((m, "main"), ty) []
 
 --- Conversion of Curry types into their FlatCurry representation
--- class ToFCY a where
---   toFCY   :: a    -> AExpr TypeExpr
---   fromFCY :: AExpr TypeExpr -> a
---
--- instance ToFCY Bool where
---   toFCY False = falseExpr
---   toFCY True  = trueExpr
---
---   fromFCY e = case e of
---     AComb _ ConsCall (("Prelude", "False"), _) [] -> False
---     AComb _ ConsCall (("Prelude",  "True"), _) [] -> True
---     _                                             -> error "fromFCY: no boolean"
---
--- instance ToFCY Int where
---   toFCY = ALit intType . Intc
---
---   fromFCY e = case e of
---     ALit _ (Intc x) -> x
---     _               -> error "fromFCY: no integer"
---
--- instance ToFCY Char where
---   toFCY = ALit charType . Charc
---
---   fromFCY e = case e of
---     ALit _ (Charc c) -> c
---     _                -> error "fromFCY: no character"
---
--- instance ToFCY Float where
---   toFCY = ALit floatType . Floatc
---
---   fromFCY e = case e of
---     ALit _ (Floatc f) -> f
---     _                 -> error "fromFCY: no float"
+class ToFCY a where
+  toFCY   :: a    -> AExpr TypeExpr
+  fromFCY :: AExpr TypeExpr -> a
 
--- instance ToFCY a => ToFCY [a] where
---   toFCY []     = nil
---   toFCY (x:xs) = cons ty [x', toFCY xs]
---     where x' = toFCY x
---           ty = annExpr x'
---
---   fromFCY e = case e of
---     AComb _ ConsCall (("Prelude", "[]"), _) []       -> []
---     AComb _ ConsCall (("Prelude",  ":"), _) [e1, e2] -> fromFCY e1 : fromFCY e2
---     _                                                -> error "fromFCY: no list"
---
--- instance (ToFCY a, ToFCY b) => ToFCY (a, b) where
---   toFCY (x, y) = tpl tty [x', y']
---     where x'  = toFCY x
---           y'  = toFCY y
---           tty = tplType [annExpr x', annExpr y']
---
---   fromFCY e = case e of
---     AComb _ ConsCall (("Prelude", "(,)"), _) [e1, e2] -> (fromFCY e1, fromFCY e2)
---     _                                                 -> error $ "fromFCY: no tuple: " ++ show e
+instance ToFCY Bool where
+  toFCY False = falseExpr
+  toFCY True  = trueExpr
+
+  fromFCY e = case e of
+    AComb _ ConsCall (("Prelude", "False"), _) [] -> False
+    AComb _ ConsCall (("Prelude",  "True"), _) [] -> True
+    _                                             -> error "fromFCY: no boolean"
+
+instance ToFCY Int where
+  toFCY = ALit intType . Intc
+
+  fromFCY e = case e of
+    ALit _ (Intc x) -> x
+    _               -> error "fromFCY: no integer"
+
+instance ToFCY Char where
+  toFCY = ALit charType . Charc
+
+  fromFCY e = case e of
+    ALit _ (Charc c) -> c
+    _                -> error "fromFCY: no character"
+
+instance ToFCY Float where
+  toFCY = ALit floatType . Floatc
+
+  fromFCY e = case e of
+    ALit _ (Floatc f) -> f
+    _                 -> error "fromFCY: no float"
+
+instance ToFCY a => ToFCY [a] where
+  toFCY []     = nil
+  toFCY (x:xs) = cons ty [x', toFCY xs]
+    where x' = toFCY x
+          ty = annExpr x'
+
+  fromFCY e = case e of
+    AComb _ ConsCall (("Prelude", "[]"), _) []       -> []
+    AComb _ ConsCall (("Prelude",  ":"), _) [e1, e2] -> fromFCY e1 : fromFCY e2
+    _                                                -> error "fromFCY: no list"
+
+instance (ToFCY a, ToFCY b) => ToFCY (a, b) where
+  toFCY (x, y) = tpl tty [x', y']
+    where x'  = toFCY x
+          y'  = toFCY y
+          tty = tplType [annExpr x', annExpr y']
+
+  fromFCY e = case e of
+    AComb _ ConsCall (("Prelude", "(,)"), _) [e1, e2] -> (fromFCY e1, fromFCY e2)
+    _                                                 -> error $ "fromFCY: no tuple: " ++ show e
 
 --- Pretty print a FlatCurry expression
 printExpr :: AExpr TypeExpr -> IO ()

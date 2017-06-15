@@ -10,8 +10,8 @@ import Unsafe (unsafePerformIO)
 
 import CCTOptions (CCTOpts (..), Verbosity (..))
 
-traceDebug :: CCTOpts -> String -> a -> a
-traceDebug opts msg x = unsafePerformIO (debug opts msg >> return x)
+traceEval :: CCTOpts -> String -> a -> a
+traceEval opts msg x = unsafePerformIO (debugEval opts msg >> return x)
 
 traceInfo :: CCTOpts -> String -> a -> a
 traceInfo opts msg x = unsafePerformIO (info opts msg >> return x)
@@ -27,3 +27,13 @@ info opts msg = when (optVerbosity opts >= Info) (putStrLn msg)
 --- Print debug information
 debug :: CCTOpts -> String -> IO ()
 debug opts msg = when (optVerbosity opts >= Debug) (putStrLn msg)
+
+--- Print debug information on concolic evaluation
+debugEval :: CCTOpts -> String -> IO ()
+debugEval opts msg
+  = when (optDumpEval opts || optVerbosity opts >= Debug) (putStrLn msg)
+
+--- Print debug information on concolic search
+debugSearch :: CCTOpts -> String -> IO ()
+debugSearch opts msg
+  = when (optDumpSearch opts || optVerbosity opts >= Debug) (putStrLn msg)

@@ -14,7 +14,7 @@ import List                        ((\\), find, intersect, nub)
 import CCTOptions                  (CCTOpts (..))
 import FlatCurryGoodies
 import Heap
-import Output                      (traceDebug, traceInfo)
+import Output                      (traceEval, traceInfo)
 import PrettyPrint hiding          (combine)
 import Substitution
 import Symbolic
@@ -66,7 +66,7 @@ traceStep e x = do
   opts <- getOpts
   h    <- getHeap
   t    <- getTrace
-  traceDebug opts
+  traceEval opts
     (pPrint $ vsep [ text "Heap:"           <+> ppHeap h
                    , text "Symbolic Trace:" <+> listSpaced (map pretty t)
                    , text "Expression:"     <+> ppExp e
@@ -204,7 +204,7 @@ mkDecision cid bnr v (qn, ty) args = modify $
 
 --- concolic evaluation
 ceval :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
-      -> (AExpr TypeExpr, [Trace], VarIndex)
+      -> ([AExpr TypeExpr], [Trace], VarIndex)
 ceval opts fs v e = fromResult $ runCEM (nf e) (initState opts fs v)
 
 --- Flattening of a function call in FlatCurry
@@ -217,12 +217,12 @@ flatten v e = case e of
   _                      -> (emptySubst, e)
 
 fromResult :: Result (AExpr TypeExpr, CEState)
-           -> (AExpr TypeExpr, [Trace], VarIndex)
+           -> ([AExpr TypeExpr], [Trace], VarIndex)
 fromResult (Return (e, s)) = traceSym s
-  (e, [reverse $ cesTrace s], cesFresh s)
+  ([e], [reverse $ cesTrace s], cesFresh s)
 fromResult (Choice  e1 e2) = let (r1, t1, v1) = fromResult e1
                                  (r2, t2, v2) = fromResult e2
-                             in (mkOr r1 r2, t1 ++ t2, max v1 v2)
+                             in (r1 ++ r2, t1 ++ t2, max v1 v2)
 
 --- Evaluate given FlatCurry expression to normal form
 nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -397,7 +397,7 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "cond"             -> binary ceBuiltinCond              es
   "ensureNotFree"    -> unary  ceBuiltinEnsureNotFree     es
   "failed"           -> ceBuiltinFailed                ty es
---   "prim_error"       -> unary  ceBuiltinError             es
+  "prim_error"       -> unary  ceBuiltinError             es
   "success"          -> ceBuiltinSuccess                  es
   "unknown"          -> ceBuiltinUnknown               ty es
   "?"                -> binary ceBuiltinChoice            es
@@ -412,37 +412,37 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "=:<="             -> binary ceBuiltinLazyUni           es
 
   -- arithmetic on integers
---   "prim_Int_plus"    -> binary (ceBuiltinIntOp       (+)) es
---   "prim_Int_minus"   -> binary (ceBuiltinIntOp       (-)) es
---   "prim_Int_times"   -> binary (ceBuiltinIntOp       (*)) es
---   "prim_Int_div"     -> binary (ceBuiltinIntOp       div) es
---   "prim_Int_mod"     -> binary (ceBuiltinIntOp       mod) es
---   "prim_Int_quot"    -> binary (ceBuiltinIntOp      quot) es
---   "prim_Int_rem"     -> binary (ceBuiltinIntOp       rem) es
---   "prim_i2f"         -> unary  ceBuiltinI2F               es
+  "prim_Int_plus"    -> binary (ceBuiltinIntOp       (+)) es
+  "prim_Int_minus"   -> binary (ceBuiltinIntOp       (-)) es
+  "prim_Int_times"   -> binary (ceBuiltinIntOp       (*)) es
+  "prim_Int_div"     -> binary (ceBuiltinIntOp       div) es
+  "prim_Int_mod"     -> binary (ceBuiltinIntOp       mod) es
+  "prim_Int_quot"    -> binary (ceBuiltinIntOp      quot) es
+  "prim_Int_rem"     -> binary (ceBuiltinIntOp       rem) es
+  "prim_i2f"         -> unary  ceBuiltinI2F               es
 
   -- comparison on integers
---   "prim_eqInt"       -> binary (ceBuiltinIntOp      (==)) es
---   "prim_ltEqInt"     -> binary (ceBuiltinIntOp      (<=)) es
+  "prim_eqInt"       -> binary (ceBuiltinIntOp      (==)) es
+  "prim_ltEqInt"     -> binary (ceBuiltinIntOp      (<=)) es
 
   -- conversion from and to characters
---   "prim_ord"         -> unary ceBuiltinOrd                es
---   "prim_chr"         -> unary ceBuiltinChr                es
+  "prim_ord"         -> unary ceBuiltinOrd                es
+  "prim_chr"         -> unary ceBuiltinChr                es
 
   -- comparison on characters
---   "prim_eqChar"      -> binary (ceBuiltinCharOp     (==)) es
---   "prim_ltEqChar"    -> binary (ceBuiltinCharOp     (<=)) es
+  "prim_eqChar"      -> binary (ceBuiltinCharOp     (==)) es
+  "prim_ltEqChar"    -> binary (ceBuiltinCharOp     (<=)) es
 
   -- arithmetic on floats
---   "prim_Float_plus"  -> binary (ceBuiltinFloatOp     (+)) es
---   "prim_Float_minus" -> binary (ceBuiltinFloatOp     (-)) es
---   "prim_Float_times" -> binary (ceBuiltinFloatOp     (*)) es
---   "prim_Float_div"   -> binary (ceBuiltinFloatOp     (/)) es
---   "prim_negateFloat" -> unary  ceBuiltinNegFloat          es
+  "prim_Float_plus"  -> binary (ceBuiltinFloatOp     (+)) es
+  "prim_Float_minus" -> binary (ceBuiltinFloatOp     (-)) es
+  "prim_Float_times" -> binary (ceBuiltinFloatOp     (*)) es
+  "prim_Float_div"   -> binary (ceBuiltinFloatOp     (/)) es
+  "prim_negateFloat" -> unary  ceBuiltinNegFloat          es
 
   -- comparison on floats
---   "prim_eqFloat"     -> binary (ceBuiltinFloatOp    (==)) es
---   "prim_ltEqFloat"   -> binary (ceBuiltinFloatOp    (<=)) es
+  "prim_eqFloat"     -> binary (ceBuiltinFloatOp    (==)) es
+  "prim_ltEqFloat"   -> binary (ceBuiltinFloatOp    (<=)) es
   _                  -> error $ "ceBuiltin: Unknown built in function " ++ show f
 
 unary :: (AExpr TypeExpr -> CEM (AExpr TypeExpr)) -> [AExpr TypeExpr]
@@ -493,12 +493,12 @@ ceBuiltinFailed ty es = case es of
   _  -> error "Eval.ceBuiltinFailed"
 
 --- Concolic evaluation of `error`
--- ceBuiltinError :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinError e = do
---   v1 <- nf e
---   case v1 of
---     AComb _ ConsCall _ _ -> error $ fromFCY v1
---     _                    -> ceBuiltinError v1
+ceBuiltinError :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinError e = do
+  v1 <- nf e
+  case v1 of
+    AComb _ ConsCall _ _ -> error $ fromFCY v1
+    _                    -> ceBuiltinError v1
 
 --- Concolic evaluation of `success`
 ceBuiltinSuccess :: [AExpr TypeExpr] -> CEM (AExpr TypeExpr)
@@ -533,32 +533,32 @@ ceBuiltinAmp e1 e2 = hnf e1 >>= \v1 -> case v1 of
       | otherwise            -> ceBuiltinAmp v1 v2
 
 --- Concolic evaluation of `negateFloat`
--- ceBuiltinNegFloat :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinNegFloat e = do
---   v <- hnf e
---   case v of
---     ALit _ (Floatc l) -> return (toFCY (negate l))
---     _                 -> ceBuiltinNegFloat v
+ceBuiltinNegFloat :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinNegFloat e = do
+  v <- hnf e
+  case v of
+    ALit _ (Floatc l) -> return (toFCY (negate l))
+    _                 -> ceBuiltinNegFloat v
 
 --- Concolic evaluation of `ord`
--- ceBuiltinOrd :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinOrd e = hnf e >>= \v -> case v of
---   ALit _ (Charc l) -> return (toFCY (ord l))
---   _                -> ceBuiltinOrd v
+ceBuiltinOrd :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinOrd e = hnf e >>= \v -> case v of
+  ALit _ (Charc l) -> return (toFCY (ord l))
+  _                -> ceBuiltinOrd v
 
 --- Concolic evaluation of `chr`
--- ceBuiltinChr :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinChr e = hnf e >>= \v -> case v of
---   ALit _ (Intc l) -> return (toFCY (chr l))
---   _               -> ceBuiltinChr v
+ceBuiltinChr :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinChr e = hnf e >>= \v -> case v of
+  ALit _ (Intc l) -> return (toFCY (chr l))
+  _               -> ceBuiltinChr v
 
 --- Concolic evaluation of `i2f`
--- ceBuiltinI2F :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinI2F e = do
---   v <- hnf e
---   case v of
---     ALit _ (Intc l) -> return (toFCY (fromInteger l))
---     _               -> ceBuiltinI2F v
+ceBuiltinI2F :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinI2F e = do
+  v <- hnf e
+  case v of
+    ALit _ (Intc l) -> return (toFCY (fromInteger l))
+    _               -> ceBuiltinI2F v
 
 --- Concolic evaluation of `(&&)`
 ceBuiltinAnd :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -700,36 +700,36 @@ occurCheck i e h = i `elem` freeVars e h
 --- Concolic evaluation of binary operations on integers (arithmetic, logical)
 -- Note that PAKCS applies most binary operators in reverse order.
 -- For this reason, the arguments of `ceBuiltinIntOp` are switched internally.
--- ceBuiltinIntOp :: ToFCY a => (Int -> Int -> a) -> AExpr TypeExpr
---                -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinIntOp op e1 e2 = do
---   v1 <- hnf e1
---   v2 <- hnf e2
---   case (v1, v2) of
---     (ALit _ (Intc l1), ALit _ (Intc l2)) -> return $ toFCY (op l2 l1)
---     _                                    -> ceBuiltinIntOp op v1 v2
+ceBuiltinIntOp :: ToFCY a => (Int -> Int -> a) -> AExpr TypeExpr
+               -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinIntOp op e1 e2 = do
+  v1 <- hnf e1
+  v2 <- hnf e2
+  case (v1, v2) of
+    (ALit _ (Intc l1), ALit _ (Intc l2)) -> return $ toFCY (op l2 l1)
+    _                                    -> ceBuiltinIntOp op v1 v2
 
 --- Concolic evaluation of binary operations on characters (arithmetic, logical)
--- ceBuiltinCharOp :: ToFCY a => (Char -> Char -> a) -> AExpr TypeExpr
---                 -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinCharOp op e1 e2 = do
---   v1 <- hnf e1
---   v2 <- hnf e2
---   case (v1, v2) of
---     (ALit _ (Charc l1), ALit _ (Charc l2)) -> return $ toFCY (op l1 l2)
---     _                                      -> ceBuiltinCharOp op v1 v2
+ceBuiltinCharOp :: ToFCY a => (Char -> Char -> a) -> AExpr TypeExpr
+                -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinCharOp op e1 e2 = do
+  v1 <- hnf e1
+  v2 <- hnf e2
+  case (v1, v2) of
+    (ALit _ (Charc l1), ALit _ (Charc l2)) -> return $ toFCY (op l1 l2)
+    _                                      -> ceBuiltinCharOp op v1 v2
 
 --- Concolic evaluation of binary operations on floats (arithmetic, logical)
 -- Note that PAKCS applies most binary operators in reverse order.
 -- For this reason, the arguments of `ceBuiltinFloatOp` are switched internally.
--- ceBuiltinFloatOp :: ToFCY a => (Float -> Float -> a) -> AExpr TypeExpr
---                  -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
--- ceBuiltinFloatOp op e1 e2 = do
---   v1 <- hnf e1
---   v2 <- hnf e2
---   case (v1, v2) of
---     (ALit _ (Floatc l1), ALit _ (Floatc l2)) -> return $ toFCY (op l2 l1)
---     _                                        -> ceBuiltinFloatOp op v1 v2
+ceBuiltinFloatOp :: ToFCY a => (Float -> Float -> a) -> AExpr TypeExpr
+                 -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinFloatOp op e1 e2 = do
+  v1 <- hnf e1
+  v2 <- hnf e2
+  case (v1, v2) of
+    (ALit _ (Floatc l1), ALit _ (Floatc l2)) -> return $ toFCY (op l2 l1)
+    _                                        -> ceBuiltinFloatOp op v1 v2
 
 --- FlatCurry representation of a call to a builtin function
 builtin :: TypeExpr -> String -> [AExpr TypeExpr] -> AExpr TypeExpr

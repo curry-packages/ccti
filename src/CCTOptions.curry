@@ -20,6 +20,8 @@ import Utils    (rpad)
 data CCTOpts = CCTOpts
   { optHelp        :: Bool
   , optVersion     :: Bool
+  , optDumpEval    :: Bool
+  , optDumpSearch  :: Bool
   , optImportPaths :: [String]
   , optVerbosity   :: Verbosity
   , optSearchDepth :: Int
@@ -30,6 +32,8 @@ defCCTOpts :: CCTOpts
 defCCTOpts = CCTOpts
   { optHelp        = False
   , optVersion     = False
+  , optDumpEval    = False
+  , optDumpSearch  = False
   , optImportPaths = []
   , optVerbosity   = Status
   , optSearchDepth = 10
@@ -62,6 +66,12 @@ options =
   , Option ['V'] ["version"]
       (NoArg (onOpts $ \opts -> opts { optVersion = True }))
       "print version information and exit"
+  , Option [] ["dump-eval"]
+      (NoArg (onOpts $ \opts -> opts { optDumpEval = True }))
+      "print debug information for concolic evaluation"
+  , Option [] ["dump-search"]
+      (NoArg (onOpts $ \opts -> opts { optDumpSearch = True }))
+      "print debug information for concolic search"
   , Option ['i'] ["import-path"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optImportPaths = nub
         ((optImportPaths opts) ++ splitSearchPath arg) }) "dir[:dir]")

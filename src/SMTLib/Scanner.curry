@@ -163,14 +163,15 @@ scan s@(c:cs) = case c of
   _ | isNumber c                -> scanNum s
     | isAlpha  c || isSpecial c -> scanKWOrId s
     | isSpace  c                -> scan cs
-    | otherwise                 -> error $ "Scanner.scan: Unexpected character " ++ [c]
+    | otherwise                 -> error $ "Scanner.scan: Unexpected character "
+                                     ++ [c] ++ "\nRemaining tokens: " ++ cs
 
 isNumber :: Char -> Bool
 isNumber c = isDigit c || c == '-'
 
 isSpecial :: Char -> Bool
 isSpecial c = c `elem` [ '+', '-', '/', '*', '=', '!', '.', '$', '_', '~', '&'
-                       , '^', '<', '>', '@'
+                       , '^', '<', '>', '@', '#'
                        ]
 
 --- line comments are ignored by the scanner
