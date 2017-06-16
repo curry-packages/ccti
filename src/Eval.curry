@@ -204,8 +204,21 @@ mkDecision cid bnr v (qn, ty) args = modify $
 
 --- concolic evaluation
 ceval :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
-      -> ([AExpr TypeExpr], [Trace], VarIndex)
+      -> [(AExpr TypeExpr, CEState)]
 ceval opts fs v e = fromResult $ runCEM (nf e) (initState opts fs v)
+
+--- Prepare expression for narrowing
+prepExpr :: AExpr TypeExpr -> VarIndex -> (AExpr TypeExpr, [VarIndex])
+prepExpr e v = case e of
+  AComb ty FuncCall f es ->
+    let n  = length es - 1
+        vs = [v .. v + n]
+    in (AFree (annExpr e)
+              (zip vs (map annExpr es))
+              (AComb ty FuncCall f (zipWith toVar es vs)), vs)
+  _                      -> (e, [])
+ where
+ toVar e' vi = if isFuncPartCall e' then e' else AVar (annExpr e') vi
 
 --- Flattening of a function call in FlatCurry
 flatten :: VarIndex -> AExpr TypeExpr -> (AExpSubst, AExpr TypeExpr)
@@ -216,13 +229,9 @@ flatten v e = case e of
     in (s, AComb ty FuncCall f (zipWith AVar (map annExpr es) vs))
   _                      -> (emptySubst, e)
 
-fromResult :: Result (AExpr TypeExpr, CEState)
-           -> ([AExpr TypeExpr], [Trace], VarIndex)
-fromResult (Return (e, s)) = traceSym s
-  ([e], [reverse $ cesTrace s], cesFresh s)
-fromResult (Choice  e1 e2) = let (r1, t1, v1) = fromResult e1
-                                 (r2, t2, v2) = fromResult e2
-                             in (r1 ++ r2, t1 ++ t2, max v1 v2)
+fromResult :: Result (AExpr TypeExpr, CEState) -> [(AExpr TypeExpr, CEState)]
+fromResult (Return (e, s)) = traceSym s [(e, s)]
+fromResult (Choice  e1 e2) = fromResult e1 ++ fromResult e2
 
 --- Evaluate given FlatCurry expression to normal form
 nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -233,14 +242,14 @@ nf e = hnf e >>= \e' -> case e' of
 --- Evaluate given FlatCurry expression to head normal form
 hnf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
 hnf exp = case exp of
-  AVar        ty v -> {-traceStep exp $-} hnfVar  ty v
-  ALit        ty l -> {-traceStep exp $-} hnfLit  ty l
-  AComb ty ct f es -> {-traceStep exp $-} hnfComb ty ct f es
-  ALet      _ bs e -> {-traceStep exp $-} hnfLet  bs e
-  AFree     _ vs e -> {-traceStep exp $-} hnfFree vs e
-  AOr      _ e1 e2 -> {-traceStep exp $-} hnfOr   e1 e2
-  ACase  _ ct e bs -> {-traceStep exp $-} hnfCase ct e bs
-  ATyped     _ e _ -> {-traceStep exp $-} hnf     e
+  AVar        ty v -> traceStep exp $ hnfVar  ty v
+  ALit        ty l -> traceStep exp $ hnfLit  ty l
+  AComb ty ct f es -> traceStep exp $ hnfComb ty ct f es
+  ALet      _ bs e -> traceStep exp $ hnfLet  bs e
+  AFree     _ vs e -> traceStep exp $ hnfFree vs e
+  AOr      _ e1 e2 -> traceStep exp $ hnfOr   e1 e2
+  ACase  _ ct e bs -> traceStep exp $ hnfCase ct e bs
+  ATyped     _ e _ -> traceStep exp $ hnf     e
 
 --- Concolic evaluation of a variable
 hnfVar :: TypeExpr -> VarIndex -> CEM (AExpr TypeExpr)

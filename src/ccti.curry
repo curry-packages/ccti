@@ -16,20 +16,13 @@ import Maybe                     (fromMaybe)
 import ReadShowTerm              (readUnqualifiedTerm)
 import System                    (exitWith, getProgName)
 
-import CCTOptions                (CCTOpts (..), badUsage, getOpts)
+import CCTOptions                (CCTOpts (..), Strategy (..), badUsage, getOpts)
 import FCY2SMTLib                (fcy2SMT)
 import FlatCurryGoodies          (getMainBody, printExpr)
 import IdentifyCases             (idCases)
 import Output                    (info, status)
 import PrettyPrint hiding        ((</>))
-import Search                    (csearch)
-
--- TODO: remove when genSMTCmds was moved
--- import SMTLib.Types
--- import SMTLib.Goodies
--- import Symbolic (symInfo, SymInfo (..))
--- import FCY2SMTLib (declConst, SMTInfo (..))
--- import FiniteMap (foldFM)
+import Search                    (csearch, narrow)
 
 main :: IO ()
 main = do
@@ -45,7 +38,7 @@ main = do
   status opts "Reading FlatCurry file(s)"
   prog@(AProg m _ _ _ _) <- readAnnFlatCurry (head files)
   case getMainBody prog of
-    Nothing -> badUsage exec ["There is no main function in the given Curry file"]
+    Nothing -> badUsage exec ["The module must include a main function with a function call in its body."]
     Just  e -> do
       (ts, fs) <- getTysFuns m
       status opts "Annotating case expressions with fresh identifiers"
@@ -55,7 +48,9 @@ main = do
       let smtInfo  = fcy2SMT ts
       info opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
       status opts "Beginning with concolic search"
-      testCases <- csearch opts fs' v smtInfo e
+      testCases <- case optStrategy opts of
+                     Narrowing -> narrow  opts fs' v e
+                     DFS       -> csearch opts fs' v smtInfo e
       putStr $ pPrint $ vsep $ map ppTestCase testCases
 
 isLocal :: String -> AFuncDecl TypeExpr -> Bool
@@ -77,20 +72,6 @@ getTysFuns mod = do
         foldIO (\(ts', fs', ms') i -> getTysFuns' ts' fs' ms' i)
                (ts ++ mts, fs ++ mfs, m:ms)
                is
-
--- genSMTCmds :: CEState -> SMTLib
--- genSMTCmds state = SMTLib (tds ++ vds ++ pcs)
---   where
---     smtInfo = cesSMTInfo state
---     tds     = smtDecls smtInfo
---     vds     = foldFM (\vi ti cs -> declConst vi ti : cs) [] (smtVars smtInfo)
---     pcs     = genConstrs (map symInfo (cesTrace state))
---
--- genConstrs :: [SymInfo] -> [Command]
--- genConstrs [] = []
--- genConstrs ((SymInfo _ vi t):sis)
---   | null sis  = [Assert (tvar vi /=% t), CheckSat, GetModel]
---   | otherwise = Assert (tvar vi =% t) : genConstrs sis
 
 -- TODO: Remove when there is support for reading annotated FlatCurry files
 -- in the libraries

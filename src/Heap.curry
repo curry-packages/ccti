@@ -3,7 +3,7 @@
 --- to markers for free variables or black holes, or the expressions.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module Heap where
 
@@ -11,6 +11,7 @@ import FiniteMap
 import FlatCurry.Annotated.Types
 
 import PrettyPrint
+import Substitution
 
 --- A 'Binding' represents the value of a variable bound in the heap.
 --- @cons BlackHole   - the variable is a black hole, such as in `let x = x in x`
@@ -71,6 +72,15 @@ bindLazyFree v = bindH v LazyFree
 --- Unbind a variable in the given heap
 unbind :: VarIndex -> Heap -> Heap
 unbind = flip delFromFM
+
+-- TODO: reconsider!
+--- Transform a heap to a substitution
+toSubst :: Heap -> AExpSubst
+toSubst = foldFM updEntry (emptyFM (<))
+  where updEntry k v fm = case v of
+          BoundVar e  -> addToFM fm k e
+          LazyBound e -> addToFM fm k e
+          _           -> fm
 
 --- Pretty printing
 

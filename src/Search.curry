@@ -7,8 +7,9 @@ import List                      (delete, union)
 
 import CCTOptions                (CCTOpts (..))
 import FCY2SMTLib
-import Eval                      (ceval, flatten)
+import Eval                      (ceval, flatten, prepExpr, CEState (..))
 import FlatCurryGoodies          (TypedFCYCons (..), getTypes)
+import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS
@@ -66,6 +67,9 @@ instance Monad CSM where
   return x = CS $ \s -> return (x, s)
 
   m >>= f = CS $ \s -> runCSM m s >>= \(x, s') -> runCSM (f x) s'
+
+execCSM :: CSM a -> CSState -> IO CSState
+execCSM m s = runCSM m s >>= return . snd
 
 gets :: (CSState -> a) -> CSM a
 gets f = CS $ \s -> return (f s, s)
@@ -165,6 +169,20 @@ visitBranch cid (BNr m n) t vds uvn = case lookupFM uvn cid of
     where
     bs' = delete m bs
 
+-- TODO: Use standard search for narrowing
+narrow :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
+       -> IO [TestCase]
+narrow opts fs v e = do
+  -- prepare main expression for narrowing
+  let (e', vs) = prepExpr e v
+      results  = ceval opts fs (v - length vs) e'
+  return (map buildTC results)
+ where
+  buildTC (r, s) = (substExp (toSubst (cesHeap s)) (rmvFree e), [r])
+  rmvFree exp = case exp of
+    AFree _ _ x -> x
+    _           -> exp
+
 csearch :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> SMTInfo
         -> AExpr TypeExpr -> IO [TestCase]
 csearch opts fs v smtInfo e = do
@@ -173,7 +191,7 @@ csearch opts fs v smtInfo e = do
   -- initialize solver session
   status opts "Initializing solver session"
   session <- initSession z3 smtInfo
-  (_, s) <- runCSM (searchLoop fs v sub e') (initCSState opts smtInfo session)
+  s       <- execCSM (searchLoop fs v sub e') (initCSState opts smtInfo session)
   -- terminate solver session
   termSession (cssSession s)
   -- dump file with SMT-LIB commands
@@ -186,12 +204,12 @@ searchLoop :: [AFuncDecl TypeExpr] -> VarIndex -> AExpSubst -> AExpr TypeExpr
 searchLoop fs v sub sexp = do
   opts <- getOpts
   -- apply substitution on symbolic expression
-  let cexp = substExp sub sexp
-      (res, ts, v') = ceval opts fs v cexp
-      tcase = (cexp, res)
+  let cexp    = substExp sub sexp
+      results = ceval opts fs v cexp
+      tcase   = (cexp, map fst results)
   io $ debugSearch opts $ "Found test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
-  mapM_ updSymInfo ts
+  mapM_ updSymInfo (map (reverse . cesTrace . snd) results)
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (ppFM (\(_,n) -> text (show n)) st)
   nxt <- nextSymNode st

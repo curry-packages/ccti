@@ -5,7 +5,7 @@
 --- @version June 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
-  (CCTOpts (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
+  (CCTOpts (..), Strategy (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
 
 import FilePath (splitSearchPath)
 import GetOpt   ( OptDescr (..), ArgOrder (Permute), ArgDescr (..), getOpt
@@ -25,6 +25,7 @@ data CCTOpts = CCTOpts
   , optDumpSMT     :: Bool
   , optImportPaths :: [String]
   , optVerbosity   :: Verbosity
+  , optStrategy    :: Strategy
   , optSearchDepth :: Int
   }
 
@@ -38,12 +39,16 @@ defCCTOpts = CCTOpts
   , optDumpSMT     = False
   , optImportPaths = []
   , optVerbosity   = Status
+  , optStrategy    = DFS
   , optSearchDepth = 10
   }
 
 --- Verbosity level
 data Verbosity = Quiet | Status | Info | Debug
   deriving (Eq, Ord)
+
+--- Search strategies
+data Strategy = Narrowing | DFS
 
 --- Description and flag of verbosities
 verbosities :: [(Verbosity, String, String)]
@@ -52,6 +57,12 @@ verbosities = [ (Quiet , "0", "quiet"       )
               , (Info  , "2", "show symbolic trace")
               , (Debug , "3", "show information useful for debugging")
               ]
+
+--- Description and flag of search strategies
+strategies :: [(Strategy, String, String)]
+strategies = [ (Narrowing, "narrow", "use narrowing for test case generation")
+             , (DFS      , "dfs"   , "primitive depth first search")
+             ]
 
 --- version information of ccti
 version :: String
@@ -81,7 +92,8 @@ options =
       (ReqArg (onOptsArg $ \arg opts -> opts { optImportPaths = nub
         ((optImportPaths opts) ++ splitSearchPath arg) }) "dir[:dir]")
       "search for imports in `dir[:dir]'"
-  , mkOption ['v'] ["verbosity"] verbDescriptions "n" "verbosity level"
+  , mkOption ['v'] ["verbosity"] verbDescriptions  "n" "verbosity level"
+  , mkOption []    ["strat"]     stratDescriptions "s" "search strategy"
   , Option ['d'] ["search-depth"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optSearchDepth = read arg }) "n")
       "maximal search depth"
@@ -93,6 +105,13 @@ verbDescriptions = map toDescr verbosities
   where
   toDescr (flag, name, desc) = (name, desc, set flag)
   set f opts = opts { optVerbosity = f }
+
+--- Strategy descriptions
+stratDescriptions :: OptTable CCTOpts
+stratDescriptions = map toDescr strategies
+  where
+  toDescr (flag, name, desc) = (name, desc, set flag)
+  set f opts = opts { optStrategy = f }
 
 --- Retrieve the parsed options. This operation only returns if
 ---  * the @--help@ option was not specified

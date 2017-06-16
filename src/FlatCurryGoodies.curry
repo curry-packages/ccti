@@ -195,7 +195,10 @@ combine amp uni def es1 es2
 
 --- Get the rhs expression of the main function of the given FlatCurry program
 getMainBody :: AProg a -> Maybe (AExpr a)
-getMainBody (AProg m _ _ fs _) = findFunc (m, "main") fs >>= return . funcBody
+getMainBody (AProg m _ _ fs _) = case findFunc (m, "main") fs of
+  Just f | isFuncCall b -> Just b
+    where b = funcBody f
+  _                     -> Nothing
 
 --- Generate a call of the main function of the given module
 mainCall :: String -> TypeExpr -> AExpr TypeExpr
