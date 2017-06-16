@@ -171,11 +171,10 @@ csearch opts fs v smtInfo e = do
   let (sub, e') = flatten v e
   -- initialize solver session
   status opts "Initializing solver session"
-  session <- newSession z3
-  addCmds session (smtDecls smtInfo ++ initScopeCmds)
+  session <- initSession z3 smtInfo
   (_, s) <- runCSM (searchLoop fs v sub e') (initCSState opts smtInfo session)
   -- terminate solver session
-  terminateSession session
+  termSession (cssSession s)
   return (cssTests s)
 
 --- main loop of concolic search
@@ -198,8 +197,7 @@ searchLoop fs v sub sexp = do
     Just  n -> do
       io $ debugSearch opts $ "Next node: " ++ show n
       cmds    <- genSMTCmds n
-      session <- getSession
-      msub    <- solve session (getSMTArgs n sub) cmds
+      msub    <- solve (getSMTArgs n sub) cmds
       case msub of
         Nothing   -> return () -- instead of complete abort, drop node and continue search?
         Just sub' -> searchLoop fs v (sub `compose` sub') sexp
@@ -235,26 +233,45 @@ getSMTArgs (SymNode _ _ _ _ vs v) = dom . restrict (v:vs)
 
 --- Compute bindings for the arguments of the concolically tested expression
 --- in form of a substitution by running an SMT solver
-solve :: SolverSession -> [VarIndex] -> [Command] -> CSM (Maybe AExpSubst)
-solve s vs cmds = do
+solve :: [VarIndex] -> [Command] -> CSM (Maybe AExpSubst)
+solve vs cmds = do
   opts    <- getOpts
   smtInfo <- getSMTInfo
-  io $ do
-    -- remove constraints from previous iteration
-    resetStack s
-    -- add constraints to solver stack
-    addCmds s cmds
-    putStrLn $ "\n\nvariables " ++ show vs
-    debugSearch opts $ "SMT-LIB model:\n" ++ pPrint (pretty (SMTLib cmds))
-    -- check satisfiability
-    isSat <- checkSat s
-    debugSearch opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
-    case isSat of
-      Sat -> do
-        vals <- getValues s (map tvar vs)
-        debugSearch opts $ "Get values: " ++ pPrint (pretty vals)
-        case vals of
-          Values vps -> return $ Just $ mkSubst vs $
-                          zipWith (fromTerm smtInfo) vs (map snd vps)
-          _          -> return Nothing
-      _   -> return Nothing
+  -- remove constraints from previous iteration
+  resetSMTStack
+  -- add constraints to solver stack
+  csm $ sendCmds cmds
+  io  $ debugSearch opts $ "SMT-LIB model:\n" ++ pPrint (pretty (SMTLib cmds))
+  -- check satisfiability
+  isSat <- csm checkSat
+  io $ debugSearch opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
+  case isSat of
+    Sat -> do
+      vals <- csm $ getValues (map tvar vs)
+      io $ debugSearch opts $ "Get values: " ++ pPrint (pretty vals)
+      case vals of
+        Values vps -> return $ Just $ mkSubst vs $
+                        zipWith (fromTerm smtInfo) vs (map snd vps)
+        _          -> return Nothing
+    _   -> return Nothing
+
+--- Communication with SMT solver
+
+--- Initialize a solver session for concolic testing
+initSession :: Solver -> SMTInfo -> IO SolverSession
+initSession solver smtInfo = do
+  s <- newSession solver
+  return $ bufferCmds s (smtDecls smtInfo ++ initScopeCmds)
+
+--- Reset the internal stack of the SMT solver
+resetSMTStack :: CSM ()
+resetSMTStack = modify $
+  \s -> s { cssSession =  bufferCmds (cssSession s) [Pop 1, Push 1] }
+
+--- Lift an SMT solver operation to CSM
+csm :: SMTOp a -> CSM a
+csm computation = do
+  s <- get
+  (res, session) <- io $ computation (cssSession s)
+  put s { cssSession = session }
+  return res

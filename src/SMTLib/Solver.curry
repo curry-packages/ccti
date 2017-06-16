@@ -4,7 +4,7 @@
 --- Currently only the Z3 SMT solver is supported.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Solver where
 
@@ -68,82 +68,95 @@ errorMsgs rsps = case rsps of
 z3 :: Solver
 z3 = SMT { executable = "z3", flags = ["-smt2", "-in"] }
 
-type SolverSession = (Handle, Handle, Handle)
+--- A solver session includes
+---   * handles for communicating with the solver
+---   * a buffer for SMT-LIB commands
+---   * a trace of SMT-LIB commands (only required for debugging purposes)
+data SolverSession = Session
+  { handles :: (Handle, Handle, Handle)
+  , buffer  :: [SMT.Command]
+  , trace   :: [SMT.Command]
+  }
+
+--- Get the stdin handle of a solver session
+stdin :: SolverSession -> Handle
+stdin (Session (sin, _, _) _ _) = sin
+
+--- Get the stdout handle of a solver session
+stdout :: SolverSession -> Handle
+stdout (Session (_, sout, _) _ _) = sout
 
 --- Start a new SMT solver session
 newSession :: Solver -> IO SolverSession
-newSession solver = execCmd $ unwords $ executable solver : flags solver
+newSession solver = do
+  hs <- execCmd $ unwords $ executable solver : flags solver
+  return $ Session hs [] []
 
 --- Terminate an SMT solver session
-terminateSession :: SolverSession -> IO ()
-terminateSession s@(sin, _, _) = sendCmds s [SMT.Exit] >> hClose sin
+termSession :: SolverSession -> IO ()
+termSession s = sendCmds [SMT.Exit] s >> hClose (stdin s)
 
---- Add given SMTLib commands to SMT solver
-addCmds :: SolverSession -> [SMT.Command] -> IO ()
-addCmds (sin, _, _) cmds = hPutStr sin $ pPrint $ pretty $ SMT.SMTLib cmds
+--- Buffer the given SMT-LIB commands
+bufferCmds :: SolverSession -> [SMT.Command] -> SolverSession
+bufferCmds s cmds = s { buffer = (buffer s) ++ cmds }
 
---- Enter a new scope
-enterScope :: SolverSession -> IO ()
-enterScope = flip addCmds [SMT.Push 1]
-
---- Leave the current scope
-exitScope :: SolverSession -> IO ()
-exitScope = flip addCmds [SMT.Pop 1]
-
---- Reset internal stack of SMT solver
-resetStack :: SolverSession -> IO ()
-resetStack = flip addCmds [SMT.Pop 1, SMT.Push 1]
+--- SMT solver operation
+type SMTOp a = SolverSession -> IO (a, SolverSession)
 
 --- Check for syntactic errors as well as for satisfiability of the assertions
-checkSat :: SolverSession -> IO Result
+checkSat :: SMTOp Result
 checkSat s = do
-  sendCmds s []
   errMsg <- getDelimited s
   -- check for syntactic errors, type mismatches etc.
   case parseCmdRsps errMsg of
-    Left  msg  -> return $ parserError msg
-    Right rs | not (null rs) -> return $ errorMsgs rs
+    Left  msg                -> return (parserError msg, s)
+    Right rs | not (null rs) -> return (errorMsgs rs   , s)
              | otherwise     -> do
-      sendCmds s [SMT.CheckSat]
-      satMsg <- getDelimited s
+      (_,s') <- sendCmds [SMT.CheckSat] s
+      satMsg <- getDelimited s'
       -- check satisfiability
       case parseCmdRsps satMsg of
-        Left  msg                           -> return $ parserError msg
-        Right [SMT.CheckSatRsp SMT.Unknown] -> return Unknown
-        Right [SMT.CheckSatRsp SMT.Unsat]   -> return Unsat
-        Right [SMT.CheckSatRsp SMT.Sat]     -> return Sat
-        Right rsps                          -> return $ errorMsgs rsps
+        Left  msg                           -> return (parserError msg, s')
+        Right [SMT.CheckSatRsp SMT.Unknown] -> return (Unknown        , s')
+        Right [SMT.CheckSatRsp SMT.Unsat]   -> return (Unsat          , s')
+        Right [SMT.CheckSatRsp SMT.Sat]     -> return (Sat            , s')
+        Right rsps                          -> return (errorMsgs rsps , s')
 
 --- Get a model for the current assertions on the solver stack
-getModel :: SolverSession -> IO Result
+getModel :: SMTOp Result
 getModel s = do
-  sendCmds s [SMT.GetModel]
-  modelMsg <- getDelimited s
+  (_,s')   <- sendCmds [SMT.GetModel] s
+  modelMsg <- getDelimited s'
   case parseCmdRsps modelMsg of
-    Left  msg                 -> return $ parserError msg
-    Right [SMT.GetModelRsp m] -> return $ Model m
-    Right rsps                -> return $ errorMsgs rsps
+    Left  msg                 -> return (parserError msg, s')
+    Right [SMT.GetModelRsp m] -> return (Model m        , s')
+    Right rsps                -> return (errorMsgs rsps , s')
 
 --- Get a binding for the given variables considering the current assertions
 --- on the solver stack
-getValues :: SolverSession -> [SMT.Term] -> IO Result
-getValues s ts = do
-  sendCmds s [SMT.GetValue ts]
-  valMsg <- getDelimited s
+getValues :: [SMT.Term] -> SMTOp Result
+getValues ts s = do
+  (_,s') <- sendCmds [SMT.GetValue ts] s
+  valMsg <- getDelimited s'
   case parseCmdRsps valMsg of
-    Left  msg                 -> return $ parserError msg
-    Right [SMT.GetValueRsp m] -> return $ Values m
-    Right rsps                -> return $ errorMsgs rsps
+    Left  msg                 -> return (parserError msg, s')
+    Right [SMT.GetValueRsp m] -> return (Values m       , s')
+    Right rsps                -> return (errorMsgs rsps , s')
 
 
 --- Add delimiter to stdout via echo command in order to read answers successively
 --- and send commands to solver
-sendCmds :: SolverSession -> [SMT.Command] -> IO ()
-sendCmds s@(sin, _, _) cmds = addCmds s (cmds ++ [SMT.Echo delim]) >> hFlush sin
+sendCmds :: [SMT.Command] -> SMTOp ()
+sendCmds cmds s = do
+  let buffered = buffer s ++ cmds ++ [SMT.Echo delim]
+      sin      = stdin s
+  hPutStr sin $ pPrint $ pretty $ SMT.SMTLib buffered
+  hFlush  sin
+  return ((), s { buffer = [], trace = (trace s) ++ buffered })
 
 --- Get the contents of stdout of a solver session up to the delimiter "END-OF-ANSWER"
 getDelimited :: SolverSession -> IO String
-getDelimited (_, sout, _) = hGetUntil sout delim
+getDelimited s = hGetUntil (stdout s) delim
 
 --- SMT-LIB commands to initialize first constraint scope
 -- Note: Due to a bug of Z3, we have to declare an arbitrary SMT-LIB variable of
