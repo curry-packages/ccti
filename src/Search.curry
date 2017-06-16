@@ -13,6 +13,7 @@ import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS
 import SMTLib.Goodies            ((=%), assert, noneOf, tvar, var2SMT)
+import SMTLib.Pretty             (showSMT)
 import SMTLib.Solver
 import SMTLib.Types              (Command (..), Sort (..), SMTLib (..), Sort, Term)
 import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
@@ -175,6 +176,8 @@ csearch opts fs v smtInfo e = do
   (_, s) <- runCSM (searchLoop fs v sub e') (initCSState opts smtInfo session)
   -- terminate solver session
   termSession (cssSession s)
+  -- dump file with SMT-LIB commands
+  dumpSMT opts $ showSMT $ trace $ cssSession s
   return (cssTests s)
 
 --- main loop of concolic search
@@ -241,7 +244,7 @@ solve vs cmds = do
   resetSMTStack
   -- add constraints to solver stack
   csm $ sendCmds cmds
-  io  $ debugSearch opts $ "SMT-LIB model:\n" ++ pPrint (pretty (SMTLib cmds))
+  io  $ debugSearch opts $ "SMT-LIB model:\n" ++ showSMT cmds
   -- check satisfiability
   isSat <- csm checkSat
   io $ debugSearch opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
@@ -271,7 +274,7 @@ resetSMTStack = modify $
 --- Lift an SMT solver operation to CSM
 csm :: SMTOp a -> CSM a
 csm computation = do
-  s <- get
+  s              <- get
   (res, session) <- io $ computation (cssSession s)
   put s { cssSession = session }
   return res

@@ -2,7 +2,7 @@
 --- This module defines some auxiliary functions for intermediate output.
 ---
 --- @author  Jan Tikovsky
---- @version April 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module Output where
 
@@ -37,3 +37,9 @@ debugEval opts msg
 debugSearch :: CCTOpts -> String -> IO ()
 debugSearch opts msg
   = when (optDumpSearch opts || optVerbosity opts >= Debug) (putStrLn msg)
+
+--- Write a dump of the SMT-LIB commands which were generated during search
+--- to a file
+dumpSMT :: CCTOpts -> String -> IO ()
+dumpSMT opts smtScript
+  = when (optDumpSMT opts) (writeFile "smtDump.smt" smtScript)

@@ -150,7 +150,7 @@ sendCmds :: [SMT.Command] -> SMTOp ()
 sendCmds cmds s = do
   let buffered = buffer s ++ cmds ++ [SMT.Echo delim]
       sin      = stdin s
-  hPutStr sin $ pPrint $ pretty $ SMT.SMTLib buffered
+  hPutStr sin $ showSMT buffered
   hFlush  sin
   return ((), s { buffer = [], trace = (trace s) ++ buffered })
 

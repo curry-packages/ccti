@@ -2,12 +2,16 @@
 --- This module provides a pretty printer for the SMT-LIB language.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Pretty where
 
 import SMTLib.Types
 import PrettyPrint
+
+--- Show an SMT-LIB script
+showSMT :: [Command] -> String
+showSMT = pPrint . pretty . SMTLib
 
 instance Pretty SMTLib where
   pretty (SMTLib cmds) = vsep (map pretty cmds)

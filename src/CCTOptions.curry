@@ -2,7 +2,7 @@
 --- Command line options for the concolic testing tool.
 ---
 --- @author  Jan Tikovsky
---- @version April 2017
+--- @version June 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
   (CCTOpts (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
@@ -22,6 +22,7 @@ data CCTOpts = CCTOpts
   , optVersion     :: Bool
   , optDumpEval    :: Bool
   , optDumpSearch  :: Bool
+  , optDumpSMT     :: Bool
   , optImportPaths :: [String]
   , optVerbosity   :: Verbosity
   , optSearchDepth :: Int
@@ -34,6 +35,7 @@ defCCTOpts = CCTOpts
   , optVersion     = False
   , optDumpEval    = False
   , optDumpSearch  = False
+  , optDumpSMT     = False
   , optImportPaths = []
   , optVerbosity   = Status
   , optSearchDepth = 10
@@ -72,6 +74,9 @@ options =
   , Option [] ["dump-search"]
       (NoArg (onOpts $ \opts -> opts { optDumpSearch = True }))
       "print debug information for concolic search"
+  , Option [] ["dump-smt"]
+      (NoArg (onOpts $ \opts -> opts { optDumpSMT = True }))
+      "Write all SMT-LIB commands used during search to a file smtDump.smt"
   , Option ['i'] ["import-path"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optImportPaths = nub
         ((optImportPaths opts) ++ splitSearchPath arg) }) "dir[:dir]")
