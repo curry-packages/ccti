@@ -40,6 +40,12 @@ tcomb i ts = TComb (Id i) ts
 qtcomb :: Ident -> Sort -> [Term] -> Term
 qtcomb i s ts = TComb (As i s) ts
 
+--- smart constructor for universally quantified terms
+forAll :: [VarIndex] -> [Sort] -> Term -> Term
+forAll vs ss t = case vs of
+  [] -> t
+  _  -> Forall (zipWith SV (map var2SMT vs) ss) t
+
 --- smart constructors for SMT sorts
 
 --- smart constructor for a sort representing type variables

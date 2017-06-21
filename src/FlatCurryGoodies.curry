@@ -128,12 +128,14 @@ cons ty = AComb lty ConsCall ((prel ":"), lty)
 tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
 tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
 
---- Get argument and result types of a given type signature
-getTypes :: TypeExpr -> [TypeExpr]
-getTypes ty@(TVar         _) = [ty]
-getTypes ty@(TCons      _ _) = [ty]
-getTypes (FuncType  ty1 ty2) = ty1 : getTypes ty2
-getTypes (ForallType    _ _) = error "FlatCurryGoodies.getTypes: forall"
+--- Get the result type followed by the argument types in given order
+resArgTypes :: TypeExpr -> [TypeExpr]
+resArgTypes = resArgTypes' []
+  where
+  resArgTypes' tys ty@(TVar         _) = ty : reverse tys
+  resArgTypes' tys ty@(TCons      _ _) = ty : reverse tys
+  resArgTypes' tys (FuncType  ty1 ty2) = resArgTypes' (ty1 : tys) ty2
+  resArgTypes' _   (ForallType    _ _) = error "FlatCurryGoodies.resArgTypes"
 
 --- Select the pattern variables of a given pattern
 patVars :: APattern a -> [VarIndex]

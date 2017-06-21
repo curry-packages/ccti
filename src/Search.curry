@@ -8,12 +8,12 @@ import List                      (delete, union)
 import CCTOptions                (CCTOpts (..))
 import FCY2SMTLib
 import Eval                      (ceval, flatten, prepExpr, CEState (..))
-import FlatCurryGoodies          (TypedFCYCons (..), getTypes)
+import FlatCurryGoodies          (TypedFCYCons (..), resArgTypes)
 import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS
-import SMTLib.Goodies            ((=%), assert, noneOf, tvar, var2SMT)
+import SMTLib.Goodies            ((=%), assert, forAll, noneOf, tvar, var2SMT)
 import SMTLib.Pretty             (showSMT)
 import SMTLib.Solver
 import SMTLib.Types              (Command (..), Sort (..), SMTLib (..), Sort, Term)
@@ -21,7 +21,7 @@ import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , substExp)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
                                  , SymNode (..), Trace )
-import Utils                     (mapM_)
+import Utils                     (mapM, mapM_)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type UVNodes = FM CaseID CaseInfo
@@ -131,9 +131,9 @@ processTrace trace tree uvNodes smtInfo
         -- SMT-LIB term representation of selected FlatCurry constructor
     let t     = toTerm smtEnv c args
         -- type information for SMT variables
-        vtys    = zip (args ++ [v])
-                      (zipWith (newTypeInfo smtEnv) (getTypes cty)
-                                                     (args : repeat []))
+        vtys    = zip (v : args)
+                      (zipWith (newTypeInfo smtEnv) (resArgTypes cty)
+                                                    (args : repeat []))
         -- additional SMT-LIB variable declarations required for this node
         vdecs   = map (uncurry declConst) vtys
         -- extended SMT-LIB variable declarations
@@ -198,10 +198,16 @@ csearch opts fs v smtInfo e = do
   dumpSMT opts $ showSMT $ trace $ cssSession s
   return (cssTests s)
 
---- main loop of concolic search
 searchLoop :: [AFuncDecl TypeExpr] -> VarIndex -> AExpSubst -> AExpr TypeExpr
            -> CSM ()
-searchLoop fs v sub sexp = do
+searchLoop = searchLoopN (-1)
+
+--- main loop of concolic search
+searchLoopN :: Int -> [AFuncDecl TypeExpr] -> VarIndex -> AExpSubst -> AExpr TypeExpr
+            -> CSM ()
+searchLoopN d fs v sub sexp
+  | d == 0    = return ()
+  | otherwise = do
   opts <- getOpts
   -- apply substitution on symbolic expression
   let cexp    = substExp sub sexp
@@ -221,7 +227,7 @@ searchLoop fs v sub sexp = do
       msub    <- solve (getSMTArgs n sub) cmds
       case msub of
         Nothing   -> return () -- instead of complete abort, drop node and continue search?
-        Just sub' -> searchLoop fs v (sub `compose` sub') sexp
+        Just sub' -> searchLoopN (d-1) fs v (sub `compose` sub') sexp
 
 -- TODO: Overthink abstractions for symbolic tree
 -- this method should be provided by the interface of symbolic tree
@@ -242,11 +248,17 @@ nextSymNode st = do
 --- and the assertion of path constraints for the given symbolic node
 genSMTCmds :: SymNode -> CSM [Command]
 genSMTCmds (SymNode _ cid vds pcs _ v) = do
-  uvn <- getUVNodes
-  case lookupFM uvn cid of
-    Nothing                   -> error "Search.genSMTCmds"
-    Just (CaseInfo _ ts nvds) -> return $ vds ++ nvds
-                                              ++ [assert (v `noneOf` ts : pcs)]
+  uvn     <- getUVNodes
+  smtInfo <- getSMTInfo
+  let args = getArgs v smtInfo
+  case mapM (flip getSMTSort smtInfo) args of
+    Nothing -> error "Search.genSMTCmds: At least one argument sort is unknown"
+    Just ss -> case lookupFM uvn cid of
+      Nothing
+        -> error $ "Search.genSMTCmds: No case information for " ++ show cid
+      Just (CaseInfo _ ts nvds)
+        -> return $ vds ++ nvds
+                        ++ [assert (forAll args ss (v `noneOf` ts) : pcs)]
 
 --- Select subset of argument variables of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]

@@ -114,9 +114,19 @@ lookupFCYCons i smtInfo = lookupBMR i (smtCMap smtInfo)
 lookupType :: QName -> SMTInfo -> Maybe SMT.Ident
 lookupType qn smtInfo = lookupBM qn (smtTMap smtInfo)
 
---- Get type information and the arguments for the given SMT-LIB variable
+--- Get FlatCurry type information for the given SMT-LIB variable
 getFCYType :: VarIndex -> SMTInfo -> Maybe TypeExpr
 getFCYType vi smtInfo = fmap fcType (lookupFM (smtVars smtInfo) vi)
+
+--- Get SMT-LIB sort information for the given SMT-LIB variable
+getSMTSort :: VarIndex -> SMTInfo -> Maybe SMT.Sort
+getSMTSort vi smtInfo = fmap smtSort (lookupFM (smtVars smtInfo) vi)
+
+--- Get the arguments for the given SMT-LIB variable
+getArgs :: VarIndex -> SMTInfo -> [VarIndex]
+getArgs vi smtInfo = case lookupFM (smtVars smtInfo) vi of
+  Nothing -> []
+  Just ti -> args ti
 
 --- Create an SMTLib sort representation for the given FlatCurry type
 newSMTSort :: QName -> SMTTrans ()
