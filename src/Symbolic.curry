@@ -3,7 +3,7 @@ module Symbolic where
 import FlatCurry.Annotated.Types (QName)
 import FlatCurry.Types           (TypeExpr, VarIndex)
 
-import FlatCurryGoodies          (TypedFCYCons (..))
+import FlatCurryGoodies          (SymCons (..))
 import PrettyPrint
 import SMTLib.Pretty
 import SMTLib.Types              (Command, Term)
@@ -16,7 +16,7 @@ type Trace = [Decision]
 
 type CaseID = VarIndex
 
-data Decision = Decision CaseID BranchNr VarIndex TypedFCYCons [VarIndex]
+data Decision = Decision CaseID BranchNr VarIndex SymCons [VarIndex]
   deriving Show
 
 --- Pretty printing
@@ -24,11 +24,14 @@ instance Pretty BranchNr where
   pretty (BNr m n) = int m <> text "/" <> int n
 
 instance Pretty Decision where
-  pretty (Decision cid bnr v (TFCYCons c _) args)
+  pretty (Decision cid bnr v symc args)
     =  text "caseID" <+> ppVarIndex cid <> colon
-   <+> tupledSpaced [ text "Branch" <+> pretty bnr, ppVarIndex v, ppQName c
+   <+> tupledSpaced [ text "Branch" <+> pretty bnr, ppVarIndex v, pretty symc
                     , list (map ppVarIndex args)
                     ]
+
+ppTrace :: Trace -> Doc
+ppTrace = listSpaced . map pretty
 
 --- depth of a symbolic node in a symbolic execution tree
 type Depth = Int
@@ -48,4 +51,4 @@ data SymNode = SymNode
   , dvars  :: [VarIndex]
   , dvar   :: VarIndex
   }
- deriving Show
+ deriving (Eq, Show)

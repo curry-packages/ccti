@@ -19,9 +19,7 @@ import List                          (isPrefixOf)
 import           Bimap
 import           FlatCurryGoodies
 import           PrettyPrint
-import           SMTLib.Goodies      ( qtcomb, tvar, tyVar, tyFun, tyComb
-                                     , unqual, var2SMT
-                                     )
+import           SMTLib.Goodies
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
 import           Substitution        (substTy, unify)
@@ -29,7 +27,7 @@ import           Utils               ((<$>), mapM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa
-type ConsMap = BM TypedFCYCons SMT.Ident
+type ConsMap = BM SymCons SMT.Ident
 
 --- Bidirectional type map
 --- mapping FlatCurry types to SMTLib sorts and vice versa
@@ -103,11 +101,11 @@ addSMTDecl :: SMT.Command -> SMTTrans ()
 addSMTDecl d = modify (\s -> s { smtDecls = d : smtDecls s })
 
 --- Lookup the SMT constructor for the given FlatCurry constructor
-lookupSMTCons :: TypedFCYCons -> SMTInfo -> Maybe SMT.Ident
+lookupSMTCons :: SymCons -> SMTInfo -> Maybe SMT.Ident
 lookupSMTCons tqn smtInfo = lookupBM tqn (smtCMap smtInfo)
 
 --- Lookup the FlatCurry constructor for the given SMT constructor
-lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe TypedFCYCons
+lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe SymCons
 lookupFCYCons i smtInfo = lookupBMR i (smtCMap smtInfo)
 
 --- Lookup the SMT type for the given FlatCurry type
@@ -135,8 +133,9 @@ newSMTSort qn@(_, tc) = modify $ \smtInfo -> case lookupType qn smtInfo of
   Just _  -> smtInfo
 
 --- Create an SMTLib constructor for the given typed FlatCurry constructor
-newSMTCons :: TypedFCYCons -> SMTTrans ()
-newSMTCons tqn@(TFCYCons qn _) = modify $
+newSMTCons :: SymCons -> SMTTrans ()
+newSMTCons (SymLit         _) = return ()
+newSMTCons tqn@(SymCons qn _) = modify $
   \smtInfo -> case lookupSMTCons tqn smtInfo of
     Nothing ->
       smtInfo { smtCMap = addToBM tqn (map toLower (snd qn)) (smtCMap smtInfo) }
@@ -158,7 +157,7 @@ tdecl2SMT td = case td of
 
 cdecl2SMT :: TypeExpr -> ConsDecl -> SMTTrans SMT.ConsDecl
 cdecl2SMT rty (Cons qn@(_, c) _ _ tys) = do
-  let tqn = TFCYCons qn (mkFunType tys rty)
+  let tqn = SymCons qn (mkFunType tys rty)
   newSMTCons tqn
   tys' <- mapM ty2SMT tys
   let c' = lookupWithDefaultBM (map toLower c) tqn predefCons
@@ -168,15 +167,27 @@ ty2SMT :: TypeExpr -> SMTTrans SMT.Sort
 ty2SMT (ForallType       _ _) = error "FCY2SMT.ty2SMT: ForallType"
 ty2SMT (TVar               v) = return $ SMT.SComb (typeVars !! v) []
 ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
-ty2SMT (TCons qn@(_, tc) tys) =
-  SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
+ty2SMT (TCons qn@(_, tc) _) =
+  return $ SMT.SComb (lookupWithDefaultBM tc qn predefTypes) [] -- <$> mapM ty2SMT tys
+
+cons2SMT :: SMTInfo -> SymCons -> SMT.QIdent
+cons2SMT smtInfo tqn@(SymCons qn ty) = case lookupSMTCons tqn smtInfo of
+  Nothing -> error $ "FCY2SMTLib.cons2SMT: No SMT-LIB representation for "
+               ++ show qn
+  Just c  -> SMT.As c (toSort smtInfo (resultType ty))
+cons2SMT _ (SymLit _) = error $ "FCY2SMTLib.cons2SMT: Literals not supported yet"
 
 --- Transform a constructor expression into an SMTLib term
-toTerm :: SMTInfo -> TypedFCYCons -> [VarIndex] -> SMT.Term
-toTerm smtInfo tqn@(TFCYCons qn ty) vs = case lookupSMTCons tqn smtInfo of
-  Nothing -> error $ "FCY2SMTLib.toTerm: No SMT-LIB representation for "
-               ++ show qn
-  Just c  -> qtcomb c (toSort smtInfo (resultType ty)) (map tvar vs)
+-- toTerm :: SMTInfo -> SymCons -> [VarIndex] -> SMT.Term
+-- toTerm smtInfo tqn@(SymCons qn ty) vs = case lookupSMTCons tqn smtInfo of
+--   Nothing -> error $ "FCY2SMTLib.toTerm: No SMT-LIB representation for "
+--                ++ show qn
+--   Just c  -> qtcomb c (toSort smtInfo (resultType ty)) (map tvar vs)
+-- toTerm _ (SymLit l) [] = case l of
+--   Intc   i -> tint   i
+--   Floatc f -> tfloat f
+--   Charc  _ -> error "FCY2SMTLib.toTerm: Characters are currently not supported"
+
 
 --- Transform an SMT-LIB term into a FlatCurry expression
 fromTerm :: SMTInfo -> VarIndex -> SMT.Term -> AExpr TypeExpr
@@ -189,13 +200,20 @@ fromTerm smtInfo vi t = case getFCYType vi smtInfo of
     SMT.TComb qi ts
       | i == "tvar" -> unit
       | otherwise   -> case lookupFCYCons i smtInfo of
-        Nothing       -> error $ "FCY2SMTLib.fromTerm: No FCY representation for "
-          ++ show qi
-        Just (TFCYCons qn ty) ->
+        Just (SymCons qn ty) ->
           let ty' = substTy (unify [(resultType ty, rty)]) ty
           in AComb rty ConsCall (qn, ty') (zipWith fromTerm' (argTypes ty') ts)
+        _           -> error $ "FCY2SMTLib.fromTerm: No FCY representation for "
+          ++ show qi
       where i = unqual qi
-    _ -> error $ "FCY2SMTLib.fromTerm: " ++ show t
+    SMT.TConst sc -> fromSpecConst sc
+    _ -> error $ "FCY2SMTLib.fromTerm: " ++ show t'
+
+--- Transform an SMT-LIB spec constant into a FlatCurry expression
+fromSpecConst :: SMT.SpecConstant -> AExpr TypeExpr
+fromSpecConst (SMT.Num i) = ALit intType   (Intc i)
+fromSpecConst (SMT.Dec f) = ALit floatType (Floatc f)
+fromSpecConst (SMT.Str _) = error "FCY2SMTLib.fromSpecConst: strings not supported yet"
 
 --- Transform a FlatCurry type expression into an SMTLib sort
 toSort :: SMTInfo -> TypeExpr -> SMT.Sort
@@ -241,13 +259,13 @@ predefTypes = listToBM (<) (<) $ map qualPrel
   ]
 
 --- predefined constructors
-predefCons :: BM TypedFCYCons SMT.Ident
+predefCons :: BM SymCons SMT.Ident
 predefCons = listToBM (<) (<) $
-  [ (prelTFCYCons "False" boolType,"false")
-  , (prelTFCYCons "True"  boolType,"true")
-  , (prelTFCYCons "[]" (listType (TVar 0)),"nil")
-  , (prelTFCYCons ":" (mkFunType [TVar 0, listType (TVar 0)] (listType (TVar 0))),"insert")
-  , (prelTFCYCons "()" unitType,"unit")
+  [ (prelSymCons "False" boolType,"false")
+  , (prelSymCons "True"  boolType,"true")
+  , (prelSymCons "[]" (listType (TVar 0)),"nil")
+  , (prelSymCons ":" (mkFunType [TVar 0, listType (TVar 0)] (listType (TVar 0))),"insert")
+  , (prelSymCons "()" unitType,"unit")
   , (mkTplType "(,)"               2,"tuple2")
   , (mkTplType "(,,)"              3,"tuple3")
   , (mkTplType "(,,,)"             4,"tuple4")

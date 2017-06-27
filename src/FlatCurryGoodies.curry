@@ -12,26 +12,36 @@ import FlatCurry.Annotated.Types
 import List                        (find)
 import PrettyPrint
 
---- Qualified name of a FlatCurry constructor annotated with type information
-data TypedFCYCons = TFCYCons QName TypeExpr
+--- Symbolic FlatCurry constructor
+data SymCons = SymCons QName TypeExpr
+             | SymLit Literal
   deriving Show
 
-instance Pretty TypedFCYCons where
-  pretty (TFCYCons qn ty) = ppQName qn <+> doubleColon <+> ppTypeExp ty
+instance Pretty SymCons where
+  pretty (SymCons qn ty) = ppQName qn <+> doubleColon <+> ppTypeExp ty
+  pretty (SymLit      l) = ppLiteral l
 
 --- Consider only the qualified name when comparing two typed FlatCurry
 --- constructors
-instance Eq TypedFCYCons where
-  (TFCYCons qn1 _) == (TFCYCons qn2 _) = qn1 == qn2
+instance Eq SymCons where
+  c1 == c2 = case (c1, c2) of
+    (SymCons qn1 _, SymCons qn2 _) -> qn1 == qn2
+    (SymLit     l1, SymLit     l2) -> l1  == l2
+    _                              -> False
 
 --- Consider only the qualified name when comparing two typed FlatCurry
 --- constructors
-instance Ord TypedFCYCons where
-  compare (TFCYCons qn1 _) (TFCYCons qn2 _) = compare qn1 qn2
+instance Ord SymCons where
+  compare c1 c2 = case (c1, c2) of
+    (SymCons qn1 _, SymCons qn2 _) -> compare qn1 qn2
+    (SymLit     l1, SymLit     l2) -> compare l1 l2
+
+symCons :: (QName, TypeExpr) -> SymCons
+symCons (qn, ty) = SymCons qn ty
 
 --- Create a typed FlatCurry 'Prelude' constructor
-prelTFCYCons :: String -> TypeExpr -> TypedFCYCons
-prelTFCYCons c ty = TFCYCons (prel c) ty
+prelSymCons :: String -> TypeExpr -> SymCons
+prelSymCons c ty = SymCons (prel c) ty
 
 --- Generate a functional FlatCurry type expression from a list of argument types
 --- and a result type
@@ -101,8 +111,8 @@ tplType :: [TypeExpr] -> TypeExpr
 tplType tys = TCons (prel "(,)") tys
 
 --- smart constructor for typed tuple constructors in FlatCurry
-mkTplType :: String -> Int -> TypedFCYCons
-mkTplType n a | a >= 2 = TFCYCons qn (mkFunType tvars (TCons qn tvars))
+mkTplType :: String -> Int -> SymCons
+mkTplType n a | a >= 2 = SymCons qn (mkFunType tvars (TCons qn tvars))
   where qn    = prel n
         tvars = map TVar [0 .. a-1]
 

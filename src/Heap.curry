@@ -33,6 +33,10 @@ type Heap = FM VarIndex Binding
 emptyH :: Heap
 emptyH = emptyFM (<)
 
+--- Create a heap from a list of bindings
+fromListH :: [(VarIndex, Binding)] -> Heap
+fromListH = listToFM (<)
+
 --- Check if heap is empty
 isEmptyH :: Heap -> Bool
 isEmptyH = isEmptyFM

@@ -22,7 +22,7 @@ import FlatCurryGoodies          (getMainBody, printExpr)
 import IdentifyCases             (idCases)
 import Output                    (info, status)
 import PrettyPrint hiding        ((</>))
-import Search                    (csearch, narrow)
+import Search                    (csearch)
 
 main :: IO ()
 main = do
@@ -49,9 +49,9 @@ main = do
       info opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
       status opts "Beginning with concolic search"
       testCases <- case optStrategy opts of
-                     Narrowing -> narrow  opts fs' v e
+--                      Narrowing -> narrow  opts fs' v e
                      DFS       -> csearch opts fs' v smtInfo e
-      putStr $ pPrint $ vsep $ map ppTestCase testCases
+      putStrLn $ pPrint $ vsep $ map ppTestCase testCases
 
 isLocal :: String -> AFuncDecl TypeExpr -> Bool
 isLocal m (AFunc qn _ _ _ _) = m == fst qn

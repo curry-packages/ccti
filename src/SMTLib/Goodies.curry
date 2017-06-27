@@ -37,8 +37,8 @@ tcomb :: Ident -> [Term] -> Term
 tcomb i ts = TComb (Id i) ts
 
 --- smart constructor for qualified constructor terms
-qtcomb :: Ident -> Sort -> [Term] -> Term
-qtcomb i s ts = TComb (As i s) ts
+qtcomb :: QIdent -> [Term] -> Term
+qtcomb qi ts = TComb qi ts
 
 --- smart constructor for universally quantified terms
 forAll :: [VarIndex] -> [Sort] -> Term -> Term
@@ -72,9 +72,13 @@ t1 /=% t2 = tcomb "not" [tcomb "=" [t1, t2]]
 tand :: [Term] -> Term
 tand = tcomb "and"
 
---- Constrain an SMT variable to be distinct from the given SMT terms
-noneOf :: VarIndex -> [Term] -> Term
-noneOf v cs = tand $ map (tvar v /=%) cs
+--- Constrain an SMT variable to be distinct from the given SMT constructors
+noneOf :: VarIndex -> VarIndex -> [(QIdent, [Sort])] -> [Term]
+noneOf idx dv qis = snd $ foldr ineq (idx, []) qis
+  where ineq (qi, ss) (vi, cs) =
+          let vn = vi - length ss
+              vs = [vi, vi - 1 .. vn + 1]
+          in (vn, forAll vs ss (tvar dv /=% qtcomb qi (map tvar vs)) : cs)
 
 --- Generate a `nop` command
 nop :: Command

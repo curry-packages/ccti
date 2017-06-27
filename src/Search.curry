@@ -2,25 +2,28 @@ module Search where
 
 import FiniteMap                 ( FM, addListToFM, addToFM, delFromFM, elemFM
                                  , emptyFM, lookupFM )
+import FlatCurry.Annotated.Goodies (argTypes)
 import FlatCurry.Annotated.Types
 import List                      (delete, union)
 
 import CCTOptions                (CCTOpts (..))
 import FCY2SMTLib
-import Eval                      (ceval, flatten, prepExpr, CEState (..))
-import FlatCurryGoodies          (TypedFCYCons (..), resArgTypes)
+import Eval                      ( CEState (..), ceval, fromSubst, initCEState
+                                 , norm )
+import FlatCurryGoodies          (SymCons (..), resArgTypes)
 import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS
-import SMTLib.Goodies            ((=%), assert, forAll, noneOf, tvar, var2SMT)
+import SMTLib.Goodies            --((=%), assert, forAll, noneOf, tvar, var2SMT)
 import SMTLib.Pretty             (showSMT)
 import SMTLib.Solver
-import SMTLib.Types              (Command (..), Sort (..), SMTLib (..), Sort, Term)
+import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
+                                 , Sort, Term )
 import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , substExp)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
-                                 , SymNode (..), Trace )
+                                 , SymNode (..), Trace, ppTrace )
 import Utils                     (mapM, mapM_)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
@@ -28,9 +31,8 @@ type UVNodes = FM CaseID CaseInfo
 
 --- Information on case expressions required for the concolic search, namely:
 ---   * numbers of unvisited branches
----   * known constructor terms (in SMT-LIB representation)
----   * variable declarations (in SMT-LIB representation)
-data CaseInfo = CaseInfo [Int] [Term] [Command]
+---   * known constructor (qualified identifier and argument sorts)
+data CaseInfo = CaseInfo [Int] [(QIdent, [Sort])]
   deriving Show
 
 --- Test case data: function call with arguments and corresponding
@@ -97,6 +99,9 @@ getOpts = gets cssCCTOpts
 getSymTree :: CSM SymTree
 getSymTree = gets cssTree
 
+setSymTree :: SymTree -> CSM ()
+setSymTree st = modify $ \s -> s { cssTree = st }
+
 --- Get current map of unvisited branches
 getUVNodes :: CSM UVNodes
 getUVNodes = gets cssUVNodes
@@ -127,9 +132,11 @@ processTrace trace tree uvNodes smtInfo
   = prcTrace trace 0 [] [] [] tree uvNodes smtInfo
   where
   prcTrace []                                                _ _   _  _  st uvn smtEnv = (st, uvn, smtEnv)
-  prcTrace (Decision cid bnr v c@(TFCYCons _ cty) args : ds) d vds cs vs st uvn smtEnv =
+  prcTrace (Decision cid bnr v c@(SymCons _ cty) args : ds) d vds cs vs st uvn smtEnv =
         -- SMT-LIB term representation of selected FlatCurry constructor
-    let t     = toTerm smtEnv c args
+    let qi     = cons2SMT smtEnv c
+        -- SMT-LIB sorts of arguments
+        ss      = map (toSort smtEnv) (argTypes cty)
         -- type information for SMT variables
         vtys    = zip (v : args)
                       (zipWith (newTypeInfo smtEnv) (resArgTypes cty)
@@ -139,13 +146,13 @@ processTrace trace tree uvNodes smtInfo
         -- extended SMT-LIB variable declarations
         vds'    = vds `union` vdecs
         -- extended list of path constraints
-        cs'     = cs ++ [tvar v =% t]
+        cs'     = cs ++ [tvar v =% qtcomb qi (map tvar args)]
         -- extended list of known variables
         vs'     = v : vs
         -- extended symbolic tree
-        st'     = addNode (SymNode d cid vds cs vs v) st
+        st'     = addNode (SymNode d cid vds' cs vs v) st
         -- updated unvisited nodes
-        uvn'    = visitBranch cid bnr t vdecs uvn
+        uvn'    = visitBranch cid bnr (qi, ss) uvn
         -- updated type environment
         smtEnv' = smtEnv { smtVars = addListToFM (smtVars smtEnv) vtys }
     in prcTrace ds (d+1) vds' cs' vs' st' uvn' smtEnv'
@@ -156,109 +163,96 @@ processTrace trace tree uvNodes smtInfo
 
 --- Mark a branch as visited during concolic search
 --- by updating the map of unvisited nodes
-visitBranch :: CaseID -> BranchNr -> Term -> [Command] -> UVNodes -> UVNodes
-visitBranch cid (BNr m n) t vds uvn = case lookupFM uvn cid of
-  Nothing
-    | n == 1    -> uvn
-    | otherwise -> addToFM uvn cid
-                     (CaseInfo [b | b <- [1 .. n], b /= m] [t] vds)
-  Just (CaseInfo bs cons decls)
-    | null bs'  -> delFromFM uvn cid
-    | otherwise -> addToFM uvn cid
-                     (CaseInfo bs' ([t] `union` cons) (vds `union` decls))
+visitBranch :: CaseID -> BranchNr -> (QIdent, [Sort]) -> UVNodes -> UVNodes
+visitBranch cid (BNr m n) c uvn = case lookupFM uvn cid of
+  Nothing -> addToFM uvn cid (CaseInfo [b | b <- [1 .. n], b /= m] [c])
+  Just (CaseInfo bs cons) -> addToFM uvn cid (CaseInfo bs' ([c] `union` cons))
     where
     bs' = delete m bs
-
--- TODO: Use standard search for narrowing
-narrow :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
-       -> IO [TestCase]
-narrow opts fs v e = do
-  -- prepare main expression for narrowing
-  let (e', vs) = prepExpr e v
-      results  = ceval opts fs (v - length vs) e'
-  return (map buildTC results)
- where
-  buildTC (r, s) = (substExp (toSubst (cesHeap s)) (rmvFree e), [r])
-  rmvFree exp = case exp of
-    AFree _ _ x -> x
-    _           -> exp
 
 csearch :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> SMTInfo
         -> AExpr TypeExpr -> IO [TestCase]
 csearch opts fs v smtInfo e = do
   -- prepare main expression for concolic search
-  let (sub, e') = flatten v e
+  let (sub, e', v') = norm v e
+      ceState       = initCEState opts sub fs v'
   -- initialize solver session
   status opts "Initializing solver session"
   session <- initSession z3 smtInfo
-  s       <- execCSM (searchLoop fs v sub e') (initCSState opts smtInfo session)
+  s       <- execCSM (searchLoop sub ceState e')
+                     (initCSState opts smtInfo session)
   -- terminate solver session
   termSession (cssSession s)
   -- dump file with SMT-LIB commands
   dumpSMT opts $ showSMT $ trace $ cssSession s
   return (cssTests s)
 
-searchLoop :: [AFuncDecl TypeExpr] -> VarIndex -> AExpSubst -> AExpr TypeExpr
-           -> CSM ()
+searchLoop :: AExpSubst -> CEState -> AExpr TypeExpr -> CSM ()
 searchLoop = searchLoopN (-1)
 
 --- main loop of concolic search
-searchLoopN :: Int -> [AFuncDecl TypeExpr] -> VarIndex -> AExpSubst -> AExpr TypeExpr
-            -> CSM ()
-searchLoopN d fs v sub sexp
+searchLoopN :: Int -> AExpSubst -> CEState -> AExpr TypeExpr -> CSM ()
+searchLoopN d sub ceState e
   | d == 0    = return ()
   | otherwise = do
   opts <- getOpts
-  -- apply substitution on symbolic expression
-  let cexp    = substExp sub sexp
-      results = ceval opts fs v cexp
-      tcase   = (cexp, map fst results)
-  io $ debugSearch opts $ "Found test case: " ++ pPrint (ppTestCase tcase)
+  -- start concolic evalutation
+  let (rs, ts, v') = ceval e ceState
+      tcase        = (substExp sub e, rs)
+  io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
-  mapM_ updSymInfo (map (reverse . cesTrace . snd) results)
+  io $ debugSearch opts $
+    "Symbolic Traces: " ++ pPrint (listSpaced (map ppTrace ts))
+  mapM_ updSymInfo ts
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (ppFM (\(_,n) -> text (show n)) st)
-  nxt <- nextSymNode st
+  uv <- getUVNodes
+  io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
+  nxt <- nextSymNode
   case nxt of
-    Nothing -> return ()
+    Nothing -> io (putStrLn "!!! Queue EMPTY !!!") >> return ()
     Just  n -> do
       io $ debugSearch opts $ "Next node: " ++ show n
-      cmds    <- genSMTCmds n
+      cmds    <- genSMTCmds v' n
       msub    <- solve (getSMTArgs n sub) cmds
       case msub of
-        Nothing   -> return () -- instead of complete abort, drop node and continue search?
-        Just sub' -> searchLoopN (d-1) fs v (sub `compose` sub') sexp
+        Nothing   -> io (putStrLn "!!! NO BINDINGS !!!") >> return () -- instead of complete abort, drop node and continue search?
+        Just bdgs -> do
+          let sub'     = sub `compose` bdgs
+              ceState' = ceState { cesFresh = v'
+                                 , cesHeap  = fromSubst opts sub'
+                                 }
+          searchLoopN (d-1) sub' ceState' e
 
 -- TODO: Overthink abstractions for symbolic tree
 -- this method should be provided by the interface of symbolic tree
 --- Get next symbolic node from search tree if there is still one left
 --- abort criterion
-nextSymNode :: SymTree -> CSM (Maybe SymNode)
-nextSymNode st = do
+nextSymNode :: CSM (Maybe SymNode)
+nextSymNode = do
   opts <- getOpts
   uvn  <- getUVNodes
+  st   <- getSymTree
   case nextNode st of
     Nothing                        -> return Nothing
     Just n@(SymNode d cid _ _ _ _)
       | d > optSearchDepth opts    -> return Nothing
-      | elemFM cid uvn             -> return (Just n)
-      | otherwise                  -> nextSymNode (delNode d st)
+      | hasUnvis cid uvn           -> return (Just n)
+      | otherwise                  -> setSymTree (delNode d st) >> nextSymNode
+
+hasUnvis :: CaseID -> UVNodes -> Bool
+hasUnvis cid uv = case lookupFM uv cid of
+  Nothing              -> False
+  Just (CaseInfo bs _) -> not (null bs)
 
 --- Generate SMT-LIB commands for the variable declarations
 --- and the assertion of path constraints for the given symbolic node
-genSMTCmds :: SymNode -> CSM [Command]
-genSMTCmds (SymNode _ cid vds pcs _ v) = do
-  uvn     <- getUVNodes
-  smtInfo <- getSMTInfo
-  let args = getArgs v smtInfo
-  case mapM (flip getSMTSort smtInfo) args of
-    Nothing -> error "Search.genSMTCmds: At least one argument sort is unknown"
-    Just ss -> case lookupFM uvn cid of
-      Nothing
-        -> error $ "Search.genSMTCmds: No case information for " ++ show cid
-      Just (CaseInfo _ ts nvds)
-        -> return $ vds ++ nvds
-                        ++ [assert (forAll args ss (v `noneOf` ts) : pcs)]
+genSMTCmds :: VarIndex -> SymNode -> CSM [Command]
+genSMTCmds v (SymNode _ cid vds pcs _ dv) = do
+  uvn <- getUVNodes
+  case lookupFM uvn cid of
+    Nothing -> error $ "Search.genSMTCmds: No case information for " ++ show cid
+    Just (CaseInfo _ cons) -> return $ vds ++ [assert (pcs ++ noneOf v dv cons)]
 
 --- Select subset of argument variables of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]

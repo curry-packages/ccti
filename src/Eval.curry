@@ -3,11 +3,11 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
-import FlatCurry.Annotated.Goodies
+import FlatCurry.Annotated.Goodies hiding (range)
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
 
@@ -51,14 +51,21 @@ data CEState = CEState
   }
 
 --- Initial state for concolic evaluation
-initState :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> CEState
-initState opts fs v = CEState
+initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeExpr] -> VarIndex
+            -> CEState
+initCEState opts sub fs v = CEState
   { cesCCTOpts = opts
-  , cesHeap    = emptyH
+  , cesHeap    = fromSubst opts sub
   , cesFuncs   = fs
   , cesFresh   = v
   , cesTrace   = []
   }
+
+--- Generate a Heap from a given Substitution
+fromSubst :: CCTOpts -> AExpSubst -> Heap
+fromSubst opts sub = fromListH $ zip (dom sub) $ case optStrategy opts of
+  DFS       -> map BoundVar (range sub)
+  Narrowing -> repeat FreeVar
 
 --- Trace a single evaluation step
 traceStep :: AExpr TypeExpr -> CEM a -> CEM a
@@ -195,17 +202,15 @@ getTrace :: CEM Trace
 getTrace = gets cesTrace
 
 --- Add a decision with symbolic information for case expression `cid` to the trace
-mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeExpr) -> [VarIndex]
-           -> CEM ()
-mkDecision cid bnr v (qn, ty) args = modify $
-  \s -> s { cesTrace = (Decision cid bnr v (TFCYCons qn ty) args) : cesTrace s }
+mkDecision :: CaseID -> BranchNr -> VarIndex -> SymCons -> [VarIndex] -> CEM ()
+mkDecision cid bnr v symc args = modify $
+  \s -> s { cesTrace = (Decision cid bnr v symc args) : cesTrace s }
 
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> AExpr TypeExpr
-      -> [(AExpr TypeExpr, CEState)]
-ceval opts fs v e = fromResult $ runCEM (nf e) (initState opts fs v)
+ceval :: AExpr TypeExpr -> CEState -> ([AExpr TypeExpr], [Trace], VarIndex)
+ceval e s = fromResult $ runCEM (nf e) s
 
 --- Prepare expression for narrowing
 prepExpr :: AExpr TypeExpr -> VarIndex -> (AExpr TypeExpr, [VarIndex])
@@ -220,18 +225,23 @@ prepExpr e v = case e of
  where
  toVar e' vi = if isFuncPartCall e' then e' else AVar (annExpr e') vi
 
---- Flattening of a function call in FlatCurry
-flatten :: VarIndex -> AExpr TypeExpr -> (AExpSubst, AExpr TypeExpr)
-flatten v e = case e of
+--- Normalize FlatCurry function call
+norm :: VarIndex -> AExpr TypeExpr -> (AExpSubst, AExpr TypeExpr, VarIndex)
+norm v e = case e of
   AComb ty FuncCall f es ->
     let vs = [v, v-1 ..]
         s  = mkSubst vs es
-    in (s, AComb ty FuncCall f (zipWith AVar (map annExpr es) vs))
-  _                      -> (emptySubst, e)
+    in (s, AComb ty FuncCall f (zipWith AVar (map annExpr es) vs), v - length es)
+  _                      -> (emptySubst, e, v)
 
-fromResult :: Result (AExpr TypeExpr, CEState) -> [(AExpr TypeExpr, CEState)]
-fromResult (Return (e, s)) = traceSym s [(e, s)]
-fromResult (Choice  e1 e2) = fromResult e1 ++ fromResult e2
+--- Select the result, the symbolic trace and the next free index
+--- from the search tree of non-deterministic results
+fromResult :: Result (AExpr TypeExpr, CEState)
+           -> ([AExpr TypeExpr], [Trace], VarIndex)
+fromResult (Return (e,s)) = traceSym s ([e], [reverse (cesTrace s)], cesFresh s)
+fromResult (Choice e1 e2) = let (r1, t1, v1) = fromResult e1
+                                (r2, t2, v2) = fromResult e2
+                            in (r1 ++ r2, t1 ++ t2, min v1 v2)
 
 --- Evaluate given FlatCurry expression to normal form
 nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -346,7 +356,7 @@ hnfCase ct e bs = do
     AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        mkDecision cid (BNr n bcnt) vi c (map varNr es)
+        mkDecision cid (BNr n bcnt) vi (symCons c) (map varNr es)
         hnf (substExp (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -362,7 +372,7 @@ hnfCase ct e bs = do
           hnf be
         guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
-          mkDecision cid (BNr n bcnt) vi c ys
+          mkDecision cid (BNr n bcnt) vi (symCons c) ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')

@@ -1,6 +1,7 @@
 module PriorityQueue where
 
 import FiniteMap
+import List      (union)
 import Utils
 
 type PQueue a b = FM a [b]
@@ -13,8 +14,8 @@ getElem :: PQueue a b -> Maybe b
 getElem = fmap (head . snd) . minFM
 
 --- Add an element to the queue
-addElem :: Eq a => a -> b -> PQueue a b -> PQueue a b
-addElem k v pq = addToFM_C (++) pq k [v]
+addElem :: (Eq a, Eq b) => a -> b -> PQueue a b -> PQueue a b
+addElem k v pq = addToFM_C union pq k [v]
 
 --- Remove an element from the queue
 -- rather inefficient

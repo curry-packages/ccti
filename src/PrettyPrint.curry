@@ -3,7 +3,7 @@
 --- pretty printing libraries for Curry and annotated FlatCurry.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module PrettyPrint ( module FlatCurry.Annotated.Pretty
                    , module Pretty
@@ -27,5 +27,5 @@ ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
 
 --- Pretty printing of test cases
 ppTestCase :: (AExpr TypeExpr, [AExpr TypeExpr]) -> Doc
-ppTestCase (e, res) = parens (ppExp e <+> equals <+> list (map ppExp res))
+ppTestCase (e, res) = parens (ppExp e <+> equals <+> set (map ppExp res))
 
