@@ -39,16 +39,16 @@ type Depth = Int
 --- A symbolic node includes the following information:
 ---   * the depth of the node in the execution tree,
 ---   * the case id,
----   * possible variable declarations (SMT-LIB commands),
+---   * indices of SMT-LIB constants which are required for the SMT-LIB model
 ---   * possible path constraints (in SMT-LIB representation) and
 ---   * the decision variables introduced up to this node
 ---   * the decision variable of this node
 data SymNode = SymNode
-  { depth  :: Depth
-  , cid    :: VarIndex
-  , vdecls :: [Command]
-  , pcs    :: [Term]
-  , dvars  :: [VarIndex]
-  , dvar   :: VarIndex
+  { depth     :: Depth
+  , cid       :: VarIndex
+  , constants :: [VarIndex]
+  , pcs       :: [Term]
+  , dvars     :: [VarIndex]
+  , dvar      :: VarIndex
   }
  deriving (Eq, Show)

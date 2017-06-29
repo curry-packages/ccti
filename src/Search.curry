@@ -15,7 +15,7 @@ import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS
-import SMTLib.Goodies            --((=%), assert, forAll, noneOf, tvar, var2SMT)
+import SMTLib.Goodies
 import SMTLib.Pretty             (showSMT)
 import SMTLib.Solver
 import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
@@ -132,7 +132,7 @@ processTrace trace tree uvNodes smtInfo
   = prcTrace trace 0 [] [] [] tree uvNodes smtInfo
   where
   prcTrace []                                                _ _   _  _  st uvn smtEnv = (st, uvn, smtEnv)
-  prcTrace (Decision cid bnr v c@(SymCons _ cty) args : ds) d vds cs vs st uvn smtEnv =
+  prcTrace (Decision cid bnr v c@(SymCons _ cty) args : ds) d cidcs cs vs st uvn smtEnv =
         -- SMT-LIB term representation of selected FlatCurry constructor
     let qi     = cons2SMT smtEnv c
         -- SMT-LIB sorts of arguments
@@ -141,25 +141,19 @@ processTrace trace tree uvNodes smtInfo
         vtys    = zip (v : args)
                       (zipWith (newTypeInfo smtEnv) (resArgTypes cty)
                                                     (args : repeat []))
-        -- additional SMT-LIB variable declarations required for this node
-        vdecs   = map (uncurry declConst) vtys
-        -- extended SMT-LIB variable declarations
-        vds'    = vds `union` vdecs
+        -- extended list of required SMT-LIB constant indices
+        cidcs'    = cidcs `union` (v : args)
         -- extended list of path constraints
         cs'     = cs ++ [tvar v =% qtcomb qi (map tvar args)]
         -- extended list of known variables
         vs'     = v : vs
         -- extended symbolic tree
-        st'     = addNode (SymNode d cid vds' cs vs v) st
+        st'     = addNode (SymNode d cid cidcs' cs vs v) st
         -- updated unvisited nodes
         uvn'    = visitBranch cid bnr (qi, ss) uvn
         -- updated type environment
-        smtEnv' = smtEnv { smtVars = addListToFM (smtVars smtEnv) vtys }
-    in prcTrace ds (d+1) vds' cs' vs' st' uvn' smtEnv'
-  -- specialize type information
---   specialize old new = case old of
---     (TypeInfo (TVar _) _) -> new
---     _                     -> old
+        smtEnv' = smtEnv { smtVars = addListToFM_C unifyTypes (smtVars smtEnv) vtys }
+    in prcTrace ds (d+1) cidcs' cs' vs' st' uvn' smtEnv'
 
 --- Mark a branch as visited during concolic search
 --- by updating the map of unvisited nodes
@@ -249,11 +243,14 @@ hasUnvis cid uv = case lookupFM uv cid of
 --- Generate SMT-LIB commands for the variable declarations
 --- and the assertion of path constraints for the given symbolic node
 genSMTCmds :: VarIndex -> SymNode -> CSM [Command]
-genSMTCmds v (SymNode _ cid vds pcs _ dv) = do
-  uvn <- getUVNodes
+genSMTCmds v (SymNode _ cid cidcs pcs _ dv) = do
+  uvn     <- getUVNodes
+  smtInfo <- getSMTInfo
   case lookupFM uvn cid of
-    Nothing -> error $ "Search.genSMTCmds: No case information for " ++ show cid
-    Just (CaseInfo _ cons) -> return $ vds ++ [assert (pcs ++ noneOf v dv cons)]
+    Nothing
+      -> error $ "Search.genSMTCmds: No case information for " ++ show cid
+    Just (CaseInfo _ cons)
+      -> return $ declConsts smtInfo cidcs ++ [assert (pcs ++ noneOf v dv cons)]
 
 --- Select subset of argument variables of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]

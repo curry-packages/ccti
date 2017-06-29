@@ -51,10 +51,14 @@ instance Pretty TypeInfo where
 newTypeInfo :: SMTInfo -> TypeExpr -> [VarIndex] -> TypeInfo
 newTypeInfo smtInfo ty args = TypeInfo ty (toSort smtInfo ty) args
 
---- Generate a variable declaration in SMT-LIB
+--- Generate a single SMT-LIB constant declaration
 declConst :: VarIndex -> TypeInfo -> SMT.Command
 declConst vi (TypeInfo _ s _) = SMT.DeclareConst (var2SMT vi) s
 
+--- Generate SMT-LIB constant declarations for the given indices
+declConsts :: SMTInfo -> [VarIndex] -> [SMT.Command]
+declConsts smtInfo vs = map (uncurry declConst) $ fmToList
+                      $ filterFM (\v _ -> v `elem` vs) (smtVars smtInfo)
 
 data SMTInfo = SMTInfo
   { smtDecls :: [SMT.Command]
