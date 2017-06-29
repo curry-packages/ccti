@@ -24,7 +24,7 @@ import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , substExp)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
                                  , SymNode (..), Trace, ppTrace )
-import Utils                     (mapM, mapM_)
+import Utils                     (mapM, mapM_, unlessM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type UVNodes = FM CaseID CaseInfo
@@ -178,7 +178,7 @@ csearch opts fs v smtInfo e = do
       ceState       = initCEState opts sub fs v'
   -- initialize solver session
   status opts "Initializing solver session"
-  session <- initSession z3 smtInfo
+  session <- initSession z3 (smtDecls smtInfo)
   s       <- execCSM (searchLoop sub ceState e')
                      (initCSState opts smtInfo session)
   -- terminate solver session
@@ -222,6 +222,7 @@ searchLoopN d sub ceState e
               ceState' = ceState { cesFresh = v'
                                  , cesHeap  = fromSubst opts sub'
                                  }
+          unlessM (optIncremental opts) (csm (restartSession z3))
           searchLoopN (d-1) sub' ceState' e
 
 -- TODO: Overthink abstractions for symbolic tree
@@ -265,7 +266,7 @@ solve vs cmds = do
   opts    <- getOpts
   smtInfo <- getSMTInfo
   -- remove constraints from previous iteration
-  resetSMTStack
+  whenM (optIncremental opts) (csm resetStack)
   -- add constraints to solver stack
   csm $ sendCmds cmds
   io  $ debugSearch opts $ "SMT-LIB model:\n" ++ showSMT cmds
@@ -282,18 +283,7 @@ solve vs cmds = do
         _          -> return Nothing
     _   -> return Nothing
 
---- Communication with SMT solver
-
---- Initialize a solver session for concolic testing
-initSession :: Solver -> SMTInfo -> IO SolverSession
-initSession solver smtInfo = do
-  s <- newSession solver
-  return $ bufferCmds s (smtDecls smtInfo ++ initScopeCmds)
-
---- Reset the internal stack of the SMT solver
-resetSMTStack :: CSM ()
-resetSMTStack = modify $
-  \s -> s { cssSession =  bufferCmds (cssSession s) [Pop 1, Push 1] }
+-- helper
 
 --- Lift an SMT solver operation to CSM
 csm :: SMTOp a -> CSM a

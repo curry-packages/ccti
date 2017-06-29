@@ -95,3 +95,9 @@ assert ts = case ts of
 unqual :: QIdent -> Ident
 unqual (Id   i) = i
 unqual (As i _) = i
+
+--- Is given command a declaration of an algebraic data type
+isDeclData :: Command -> Bool
+isDeclData cmd = case cmd of
+  DeclareDatatypes _ _ _ -> True
+  _                      -> False

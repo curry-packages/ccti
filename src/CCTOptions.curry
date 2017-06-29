@@ -23,6 +23,7 @@ data CCTOpts = CCTOpts
   , optDumpEval    :: Bool
   , optDumpSearch  :: Bool
   , optDumpSMT     :: Bool
+  , optIncremental :: Bool
   , optImportPaths :: [String]
   , optVerbosity   :: Verbosity
   , optStrategy    :: Strategy
@@ -37,6 +38,7 @@ defCCTOpts = CCTOpts
   , optDumpEval    = False
   , optDumpSearch  = False
   , optDumpSMT     = False
+  , optIncremental = False
   , optImportPaths = []
   , optVerbosity   = Status
   , optStrategy    = DFS
@@ -87,7 +89,10 @@ options =
       "print debug information for concolic search"
   , Option [] ["dump-smt"]
       (NoArg (onOpts $ \opts -> opts { optDumpSMT = True }))
-      "Write all SMT-LIB commands used during search to a file smtDump.smt"
+      "write all SMT-LIB commands used during search to a file smtDump.smt"
+  , Option [] ["incremental"]
+      (NoArg (onOpts $ \opts -> opts { optIncremental = True }))
+      "solve path constraints incrementally, if possible"
   , Option ['i'] ["import-path"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optImportPaths = nub
         ((optImportPaths opts) ++ splitSearchPath arg) }) "dir[:dir]")

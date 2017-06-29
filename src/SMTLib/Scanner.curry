@@ -171,7 +171,7 @@ isNumber c = isDigit c || c == '-'
 
 isSpecial :: Char -> Bool
 isSpecial c = c `elem` [ '+', '-', '/', '*', '=', '!', '.', '$', '_', '~', '&'
-                       , '^', '<', '>', '@', '#'
+                       , '^', '<', '>', '@', '#', '\''
                        ]
 
 --- line comments are ignored by the scanner

@@ -10,9 +10,10 @@ module SMTLib.Solver where
 
 import IO
 import IOExts                        (execCmd)
+import List                          (partition)
 
 import           PrettyPrint
-import           SMTLib.Goodies      (tyComb, tyVar)
+import           SMTLib.Goodies      (isDeclData)
 import           SMTLib.Parser       (parseCmdRsps)
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
@@ -143,7 +144,6 @@ getValues ts s = do
     Right [SMT.GetValueRsp m] -> return (Values m       , s')
     Right rsps                -> return (errorMsgs rsps , s')
 
-
 --- Add delimiter to stdout via echo command in order to read answers successively
 --- and send commands to solver
 sendCmds :: [SMT.Command] -> SMTOp ()
@@ -158,12 +158,28 @@ sendCmds cmds s = do
 getDelimited :: SolverSession -> IO String
 getDelimited s = hGetUntil (stdout s) delim
 
---- SMT-LIB commands to initialize first constraint scope
--- Note: Due to a bug of Z3, we have to declare an arbitrary SMT-LIB variable of
--- the predefined list datatype. Otherwise the constructors of the list type
--- are no longer visible after executing the first pop command
-initScopeCmds :: [SMT.Command]
-initScopeCmds = [SMT.DeclareConst "l42" (tyComb "List" [tyVar]), SMT.Push 1]
+--- ----------------------------------------------------------------------------
+--- Special operations for concolic testing
+--- ----------------------------------------------------------------------------
+
+--- Initialize a solver session for concolic testing
+initSession :: Solver -> [SMT.Command] -> IO SolverSession
+initSession solver cmds = do
+  s <- newSession solver
+  return $ bufferCmds s (cmds ++ [SMT.Push 1])
+
+--- Restart SMT solver session for concolic testing
+restartSession :: Solver -> SMTOp ()
+restartSession solver s = do
+  let t        = trace s
+      (ds, cs) = partition isDeclData t
+  termSession s
+  s' <- newSession solver
+  return ((), s' { trace = cs, buffer = ds })
+
+--- Reset the internal stack of the SMT solver (for incremental solving)
+resetStack :: SolverSession -> IO ((), SolverSession) -- SMTOP ()
+resetStack s = return ((), bufferCmds s [SMT.Pop 1, SMT.Push 1])
 
 -- helper
 
