@@ -2,7 +2,7 @@
 --- This module provides some utility operations.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version May 2017
+--- @version June 2017
 --- ----------------------------------------------------------------------------
 module Utils where
 
@@ -24,6 +24,12 @@ mapM_ f = sequence_ . map f
 
 zipWithM_ :: Monad m => (a -> b -> m c) -> [a] -> [b] -> m ()
 zipWithM_ f xs ys = sequence_ $ zipWith f xs ys
+
+whenM :: Monad m => Bool -> m () -> m ()
+whenM p a = if p then a else return ()
+
+unlessM :: Monad m => Bool -> m () -> m ()
+unlessM p = whenM (not p)
 
 --- Apply a pure function to the result of a monadic action.
 (<$>) :: Monad m => (a -> b) -> m a -> m b
