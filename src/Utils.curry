@@ -22,6 +22,10 @@ mapM f = sequence . map f
 mapM_ :: Monad m => (a -> m b) -> [a] -> m ()
 mapM_ f = sequence_ . map f
 
+foldM :: Monad m => (a -> b -> m a) -> a -> [b] -> m a
+foldM _ z []     = return z
+foldM f z (x:xs) = f z x >>= \z' -> foldM f z' xs
+
 zipWithM_ :: Monad m => (a -> b -> m c) -> [a] -> [b] -> m ()
 zipWithM_ f xs ys = sequence_ $ zipWith f xs ys
 
@@ -47,6 +51,16 @@ rpad n str = str ++ replicate (n - length str) ' '
 --- swap the components of a tuple
 swap :: (a, b) -> (b, a)
 swap (x, y) = (y, x)
+
+--- zip three lists
+zip3 :: [a] -> [b] -> [c] -> [(a, b, c)]
+zip3 xs ys zs = case xs of
+  []   -> []
+  a:as -> case ys of
+            []   -> []
+            b:bs -> case zs of
+                      []   -> []
+                      c:cs -> (a, b, c) : zip3 as bs cs
 
 -- TODO: Remove when there is a functor instance for Maybe
 instance Functor Maybe where

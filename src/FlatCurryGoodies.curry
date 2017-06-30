@@ -158,6 +158,13 @@ getVarIdx e = case e of
   AVar _ i -> [i]
   _        -> []
 
+--- Get all type variables of a given FlatCurry type expression
+getTyVars :: TypeExpr -> [TVarIndex]
+getTyVars (TVar           i) = [i]
+getTyVars (FuncType ty1 ty2) = getTyVars ty1 ++ getTyVars ty2
+getTyVars (TCons      _ tys) = concatMap getTyVars tys
+getTyVars (ForallType   _ _) = []
+
 --- Check if two pattern are equal
 eqPattern :: APattern a -> APattern a -> Bool
 eqPattern p q = case (p, q) of

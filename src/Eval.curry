@@ -303,7 +303,7 @@ hnfComb ty ct f es = case ct of
   FuncCall
     | all isVar es -> lookupRule (fst f) >>= \mrule -> case mrule of
       Nothing      -> ceBuiltin ty f es
-      Just (xs, e) -> hnf (substExp (mkSubst xs es) e)
+      Just (xs, e) -> hnf (subst (mkSubst xs es) e)
     | otherwise    -> mvs >>= \vs -> hnf (AComb ty ct f vs)
   _                -> AComb ty ct f <$> mvs
  where
@@ -325,8 +325,8 @@ addBindings bs e = do
   let (txs, es) = unzip bs
       (xs, tys) = unzip txs
       sigma     = mkSubst xs (zipWith AVar tys ys)
-  zipWithM_ bindE ys (map (substExp sigma) es)
-  return (substExp sigma e)
+  zipWithM_ bindE ys (map (subst sigma) es)
+  return (subst sigma e)
 
 --- Concolic evaluation of a declaration of free variables
 hnfFree :: [(VarIndex, TypeExpr)] -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -338,7 +338,7 @@ addFrees tvs e = do
   ys <- freshVars (length tvs)
   mapM_ bindF ys
   let (vs, tys) = unzip tvs
-  return $ substExp (mkSubst vs (zipWith AVar tys ys)) e
+  return $ subst (mkSubst vs (zipWith AVar tys ys)) e
 
 --- Concolic evaluation of a non-deterministic choice
 hnfOr :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
@@ -357,7 +357,7 @@ hnfCase ct e bs = do
       Nothing          -> failS ty
       Just (n, vs, be) -> do
         mkDecision cid (BNr n bcnt) vi (symCons c) (map varNr es)
-        hnf (substExp (mkSubst vs es) be)
+        hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
       where ty = annExpr v
@@ -376,7 +376,7 @@ hnfCase ct e bs = do
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
-          hnf (substExp (mkSubst xs es') be)
+          hnf (subst (mkSubst xs es') be)
     _ -> error $ "Eval.hnfCase: " ++ show v
  where
   bcnt = length bs

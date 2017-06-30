@@ -21,7 +21,7 @@ import SMTLib.Solver
 import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
                                  , Sort, Term )
 import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
-                                 , substExp)
+                                 , subst)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
                                  , SymNode (..), Trace, ppTrace )
 import Utils                     (mapM, mapM_, unlessM, whenM)
@@ -131,28 +131,24 @@ processTrace :: Trace -> UpdSymInfo
 processTrace trace tree uvNodes smtInfo
   = prcTrace trace 0 [] [] [] tree uvNodes smtInfo
   where
-  prcTrace []                                                _ _   _  _  st uvn smtEnv = (st, uvn, smtEnv)
+  prcTrace []                                               _ _     _  _  st uvn smtEnv = (st, uvn, smtEnv)
   prcTrace (Decision cid bnr v c@(SymCons _ cty) args : ds) d cidcs cs vs st uvn smtEnv =
-        -- SMT-LIB term representation of selected FlatCurry constructor
-    let qi     = cons2SMT smtEnv c
-        -- SMT-LIB sorts of arguments
-        ss      = map (toSort smtEnv) (argTypes cty)
-        -- type information for SMT variables
-        vtys    = zip (v : args)
-                      (zipWith (newTypeInfo smtEnv) (resArgTypes cty)
-                                                    (args : repeat []))
-        -- extended list of required SMT-LIB constant indices
-        cidcs'    = cidcs `union` (v : args)
-        -- extended list of path constraints
-        cs'     = cs ++ [tvar v =% qtcomb qi (map tvar args)]
+    let -- extended list of required SMT-LIB constant indices
+        cidcs'  = cidcs `union` (v : args)
         -- extended list of known variables
         vs'     = v : vs
         -- extended symbolic tree
         st'     = addNode (SymNode d cid cidcs' cs vs v) st
+        -- updated type environment
+        smtEnv' = execSMTTrans (updTypeEnv (v:args) cty args) smtEnv -- smtEnv { smtVars = addListToFM_C unifyTypes (smtVars smtEnv) vtys }
+        -- SMT-LIB term representation of selected FlatCurry constructor
+        qi      = cons2SMT smtEnv' c v
+        -- extended list of path constraints
+        cs'     = cs ++ [tvar v =% qtcomb qi (map tvar args)]
+        -- SMT-LIB sorts of arguments
+        ss      = map (flip getSMTSort smtEnv') args
         -- updated unvisited nodes
         uvn'    = visitBranch cid bnr (qi, ss) uvn
-        -- updated type environment
-        smtEnv' = smtEnv { smtVars = addListToFM_C unifyTypes (smtVars smtEnv) vtys }
     in prcTrace ds (d+1) cidcs' cs' vs' st' uvn' smtEnv'
 
 --- Mark a branch as visited during concolic search
@@ -192,7 +188,7 @@ searchLoopN d sub ceState e
   opts <- getOpts
   -- start concolic evalutation
   let (rs, ts, v') = ceval e ceState
-      tcase        = (substExp sub e, rs)
+      tcase        = (subst sub e, rs)
   io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
   io $ debugSearch opts $
