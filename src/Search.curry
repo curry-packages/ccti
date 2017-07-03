@@ -23,7 +23,7 @@ import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
 import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , subst)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
-                                 , SymNode (..), Trace, ppTrace )
+                                 , SymNode (..), Trace, ppTrace, rnmTrace )
 import Utils                     (mapM, mapM_, unlessM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
@@ -46,17 +46,19 @@ data CSState = CSState
   , cssUVNodes :: UVNodes
   , cssSession :: SolverSession
   , cssTests   :: [TestCase]
+  , cssSymArgs :: [VarIndex]
   }
 
 --- Initial state for the concolic search
-initCSState :: CCTOpts -> SMTInfo -> SolverSession -> CSState
-initCSState opts smtInfo session = CSState
+initCSState :: CCTOpts -> SMTInfo -> SolverSession -> [VarIndex] -> CSState
+initCSState opts smtInfo session sargs = CSState
   { cssCCTOpts = opts
   , cssSMTInfo = smtInfo
   , cssTree    = newTree
   , cssUVNodes = emptyFM (<)
   , cssSession = session
   , cssTests   = []
+  , cssSymArgs = sargs
   }
 
 --------------------------------------------------------------------------------
@@ -114,6 +116,10 @@ getSession = gets cssSession
 getSMTInfo :: CSM SMTInfo
 getSMTInfo = gets cssSMTInfo
 
+--- Get symbolic arguments of expression to be tested
+getSymArgs :: CSM [VarIndex]
+getSymArgs = gets cssSymArgs
+
 --- Add a test case to the current test cases
 addTestCase :: TestCase -> CSM ()
 addTestCase tc = modify $ \s -> s { cssTests = tc : cssTests s }
@@ -170,7 +176,7 @@ csearch opts fs v smtInfo e = do
   status opts "Initializing solver session"
   session <- initSession z3 (smtDecls smtInfo)
   s       <- execCSM (searchLoop sub ceState e')
-                     (initCSState opts smtInfo session)
+                     (initCSState opts smtInfo session (dom sub))
   -- terminate solver session
   termSession (cssSession s)
   -- dump file with SMT-LIB commands
@@ -187,8 +193,10 @@ searchLoopN d sub ceState e
   | otherwise = do
   opts <- getOpts
   -- start concolic evalutation
-  let (rs, ts, v') = ceval e ceState
-      tcase        = (subst sub e, rs)
+  -- we need to rename trace variables due to possible naming conflicts
+  -- in non-deterministic branches
+  (rs, ts, v') <- renameTraces (ceval e ceState)
+  let tcase = (subst sub e, rs)
   io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
   io $ debugSearch opts $
@@ -214,6 +222,17 @@ searchLoopN d sub ceState e
                                  }
           unlessM (optIncremental opts) (csm (restartSession z3))
           searchLoopN (d-1) sub' ceState' e
+
+--- Renaming of trace variables
+renameTraces :: ([AExpr TypeExpr], [Trace], VarIndex)
+             -> CSM ([AExpr TypeExpr], [Trace], VarIndex)
+renameTraces info@(res, traces, v)
+  | length traces < 2 = return info
+  | otherwise         = do
+    sargs <- getSymArgs
+    let (t:ts)    = traces
+        (ts', v') = foldr (rnmTrace sargs) ([], v) ts
+    return (res, t : reverse ts', v')
 
 -- TODO: Overthink abstractions for symbolic tree
 -- this method should be provided by the interface of symbolic tree

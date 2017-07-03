@@ -289,21 +289,6 @@ toSort smtInfo (TCons   qn tys) = case lookupType qn smtInfo of
                  ++ show qn
   Just tc -> tyComb tc (map (toSort smtInfo) tys)
 
-
--- map predefined types and constructors to the corresponding SMTLib name
-
--- im trace werden in jeder decision, der case branch der varindex,
--- der smtlib konstruktor sowie die argumentvariablen des entspr. konstruktors
--- gespeichert
-
--- für jede decision muss später in SMT eine variable deklariert werden
--- hierzu müssen zusätzlich typinformationen gespeichert werden
--- speichere die smtlib representation des jeweiligen typkonstruktors in decision mit ab?
-
--- eventuell ist es einfacher annotated flatcurry zu verwenden und dann bei der
--- konkolischen interpretation einfach den annotierten typ eines case branches
--- in die entsprechende smtlib darstellung zu transformieren?
-
 --- infinite list of type variables
 typeVars :: [String]
 typeVars = [c : if n == 0 then [] else show n |  n <- [0 ..], c <- ['a' .. 'z']]

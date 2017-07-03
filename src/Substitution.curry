@@ -98,7 +98,7 @@ type TypeSubst = Subst TVarIndex TypeExpr
 --- simple unification on FlatCurry type expression
 unify :: [(TypeExpr, TypeExpr)] -> TypeSubst
 unify eqs = case unify' emptySubst eqs of
-  Nothing  -> error "Given type equations are not unifiable"
+  Nothing  -> error $ "Given type equations are not unifiable: " ++ show eqs
   Just mgu -> mgu
 
 unify' :: TypeSubst -> [(TypeExpr, TypeExpr)] -> Maybe TypeSubst

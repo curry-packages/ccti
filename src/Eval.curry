@@ -11,7 +11,7 @@ import FlatCurry.Annotated.Goodies hiding (range)
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
 
-import CCTOptions                  (CCTOpts (..))
+import CCTOptions                  (CCTOpts (..), Strategy (..))
 import FlatCurryGoodies
 import Heap
 import Output                      (traceEval, traceInfo)

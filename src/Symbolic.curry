@@ -2,6 +2,7 @@ module Symbolic where
 
 import FlatCurry.Annotated.Types (QName)
 import FlatCurry.Types           (TypeExpr, VarIndex)
+import List                      (nub)
 
 import FlatCurryGoodies          (SymCons (..))
 import PrettyPrint
@@ -52,3 +53,20 @@ data SymNode = SymNode
   , dvar      :: VarIndex
   }
  deriving (Eq, Show)
+
+--- Get all symbolic variables of a decision
+getSVars :: Decision -> [VarIndex]
+getSVars (Decision _ _ sv _ args) = sv : args
+
+--- Rename all variables occuring in a trace
+rnmTrace :: [VarIndex] -> Trace -> ([Trace],VarIndex) -> ([Trace],VarIndex)
+rnmTrace sargs ds (ts, v) =
+  let svars = filter (`notElem` sargs) $ nub $ concatMap getSVars ds
+      sub   = zip svars [v, v-1 ..]
+  in (map (appSub sub) ds : ts, v - length svars)
+  where
+  appSub sub' (Decision cid bnr sv scon args) =
+    let repl x = case lookup x sub' of
+                   Nothing -> x
+                   Just  y -> y
+    in Decision cid bnr (repl sv) scon (map repl args)

@@ -45,4 +45,5 @@ dumpSMT opts smtScript
   = when (optDumpSMT opts) (writeFile "smtDump.smt" smtScript)
 
 --- Write the given String to the command line with a preceeding line of `=`
+putMsg :: String -> IO ()
 putMsg msg = putStrLn (replicate 120 '=') >> putStrLn msg
