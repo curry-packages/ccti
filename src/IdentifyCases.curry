@@ -11,15 +11,28 @@
 ---
 ---     where cid is a fresh identifier
 ---
+---   - Furthermore, cases with boolean expressions as arguments are normalized
+---     in the following form:
+---
+---     case c1 && c2 of                            case c1 of
+---       True  -> e1         is transformed to       True  -> case c2 of
+---       False -> e2                                            True  -> e1
+---                                                              False -> e2
+---                                                   False -> e2
+---
+---     Disjunctions are transformed in a similar way.
+---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version July 2017
 --- ----------------------------------------------------------------------------
 module IdentifyCases where
 
 import FiniteMap
 import FlatCurry.Annotated.Types
-import FlatCurry.Annotated.Goodies (annExpr)
+import FlatCurry.Annotated.Goodies (annExpr, combArgs)
 
+import FlatCurryGoodies            ( eqPattern, falsePat, isBoolType, isConj
+                                   , isDisj, truePat )
 import Utils
 
 data ICM a = IC { runICM :: VarIndex -> (a, VarIndex) }
@@ -42,14 +55,14 @@ freshID = do
   return v
 
 --- Add a unique identifier to all expressions which are scrutinized in cases
-idCases :: [AFuncDecl a] -> ([AFuncDecl a], VarIndex)
+idCases :: [AFuncDecl TypeExpr] -> ([AFuncDecl TypeExpr], VarIndex)
 idCases fs = (runICM (mapM icFunc fs)) (-1)
 
-icFunc :: AFuncDecl a -> ICM (AFuncDecl a)
+icFunc :: AFuncDecl TypeExpr -> ICM (AFuncDecl TypeExpr)
 icFunc (AFunc qn a vis ty r) = AFunc qn a vis ty <$> icRule r
 
-icRule :: ARule a -> ICM (ARule a)
-icRule (ARule  ann vs e) = ARule ann vs <$> icExpr e
+icRule :: ARule TypeExpr -> ICM (ARule TypeExpr)
+icRule (ARule  ann vs e) = ARule ann vs <$> splitCases e -- icExpr e
 icRule e@(AExternal _ _) = return e
 
 icExpr :: AExpr a -> ICM (AExpr a)
@@ -67,3 +80,49 @@ icExpr (ACase  ann ct e bs) = do
  where annE                    = annExpr e
        icBranch (ABranch p be) = ABranch p <$> icExpr be
 icExpr (ATyped   ann e ty) = flip (ATyped ann) ty <$> icExpr e
+
+splitCases :: AExpr TypeExpr -> ICM (AExpr TypeExpr)
+splitCases v@(AVar        _ _) = return v
+splitCases l@(ALit        _ _) = return l
+splitCases (AComb ty ct qn es) = AComb ty ct qn <$> mapM splitCases es
+splitCases (ALet      ty bs e) = ALet ty <$> mapM splitBinding bs
+                                         <*> splitCases e
+  where splitBinding (v, ve) = splitCases ve >>= \ve' -> return (v, ve')
+splitCases (AFree     ty vs e) = AFree ty vs <$> splitCases e
+splitCases (AOr      ty e1 e2) = AOr ty <$> splitCases e1 <*> splitCases e2
+splitCases c@(ACase  ty ct e bs)
+  | isBoolType (annExpr e)     = idCase (splitCase ty ct e bs)
+  | otherwise                  = idCase c
+splitCases (ATyped   ty e ty') = flip (ATyped ty) ty' <$> splitCases e
+
+--- Split up case expressions over conditionals (i.e. sequences of simple
+--- boolean expressions connected with `&&` or `||`)
+splitCase :: TypeExpr -> CaseType -> AExpr TypeExpr -> [ABranchExpr TypeExpr]
+          -> AExpr TypeExpr
+splitCase ty ct e bs
+  | isConj e  = splitCase ty ct c1 (branch truePat  : selBranch falsePat bs)
+  | isDisj e  = splitCase ty ct c1 (branch falsePat : selBranch truePat  bs)
+  | otherwise = ACase ty ct e bs
+  where [c1,c2]   = combArgs e
+        innerCase = splitCase ty ct c2 bs
+        branch p  = ABranch p innerCase
+
+--- Add a unique identifier to a case expression
+idCase :: AExpr TypeExpr -> ICM (AExpr TypeExpr)
+idCase exp = case exp of
+  ACase ty ct e bs -> do
+    v   <- freshID
+    bs' <- mapM splitBranch bs
+    return $ ALet ty [((v, tyE), e)] (ACase ty ct (AVar tyE v) bs')
+   where tyE                        = annExpr e
+         splitBranch (ABranch p be) = ABranch p <$> splitCases be
+  _                -> splitCases exp
+
+-- helper
+
+-- select the branch expression matching the given pattern
+selBranch :: APattern a -> [ABranchExpr a] -> [ABranchExpr a]
+selBranch _ []                     = []
+selBranch p (b@(ABranch q _) : bs)
+  | eqPattern p q                  = [b]
+  | otherwise                      = selBranch p bs

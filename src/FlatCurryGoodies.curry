@@ -138,6 +138,30 @@ cons ty = AComb lty ConsCall ((prel ":"), lty)
 tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
 tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
 
+--- Check if the given FlatCurry type is a boolean type
+isBoolType :: TypeExpr -> Bool
+isBoolType ty = ty == boolType
+
+--- Check if the given FlatCurry expression is a boolean conjunction
+isConj :: AExpr a -> Bool
+isConj e = case e of
+  AComb _ _ (qn, _) _ -> qn == prel "&&" || qn == prel "&"
+  _                   -> False
+
+--- Check if the given FlatCurry expression is a boolean disjunction
+isDisj :: AExpr a -> Bool
+isDisj e = case e of
+  AComb _ _ (qn, _) _ -> qn == prel "||"
+  _                   -> False
+
+--- FlatCurry `True` pattern
+truePat :: APattern TypeExpr
+truePat = APattern boolType (prel "True", boolType) []
+
+--- FlatCurry `True` pattern
+falsePat :: APattern TypeExpr
+falsePat = APattern boolType (prel "False", boolType) []
+
 --- Get the result type followed by the argument types in given order
 resArgTypes :: TypeExpr -> [TypeExpr]
 resArgTypes = resArgTypes' []
