@@ -27,7 +27,7 @@ import           Utils               ((<$>), foldM, mapM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa
-type ConsMap = BM SymCons SMT.Ident
+type ConsMap = BM SymObj SMT.Ident
 
 --- Bidirectional type map
 --- mapping FlatCurry types to SMTLib sorts and vice versa
@@ -164,11 +164,11 @@ addSMTDecl :: SMT.Command -> SMTTrans ()
 addSMTDecl d = modify (\s -> s { smtDecls = d : smtDecls s })
 
 --- Lookup the SMT constructor for the given FlatCurry constructor
-lookupSMTCons :: SymCons -> SMTInfo -> Maybe SMT.Ident
+lookupSMTCons :: SymObj -> SMTInfo -> Maybe SMT.Ident
 lookupSMTCons tqn smtInfo = lookupBM tqn (smtCMap smtInfo)
 
 --- Lookup the FlatCurry constructor for the given SMT constructor
-lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe SymCons
+lookupFCYCons :: SMT.Ident -> SMTInfo -> Maybe SymObj
 lookupFCYCons i smtInfo = lookupBMR i (smtCMap smtInfo)
 
 --- Lookup the SMT type for the given FlatCurry type
@@ -200,13 +200,13 @@ newSMTSort qn@(_, tc) = modify $ \smtInfo -> case lookupType qn smtInfo of
   Just _  -> smtInfo
 
 --- Create an SMTLib constructor for the given typed FlatCurry constructor
-newSMTCons :: SymCons -> SMTTrans ()
-newSMTCons (SymLit         _) = return ()
+newSMTCons :: SymObj -> SMTTrans ()
 newSMTCons tqn@(SymCons qn _) = modify $
   \smtInfo -> case lookupSMTCons tqn smtInfo of
     Nothing ->
       smtInfo { smtCMap = addToBM tqn (map toLower (snd qn)) (smtCMap smtInfo) }
     Just _  -> smtInfo
+newSMTCons (SymLit       _ _) = return ()
 
 fcy2SMT :: [TypeDecl] -> SMTInfo
 fcy2SMT ts = execSMTTrans (mapM tdecl2SMT ts) initSMTInfo
@@ -237,12 +237,13 @@ ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
 ty2SMT (TCons qn@(_, tc) _) =
   return $ SMT.SComb (lookupWithDefaultBM tc qn predefTypes) [] -- <$> mapM ty2SMT tys
 
-cons2SMT :: SMTInfo -> SymCons -> VarIndex -> SMT.QIdent
+--- Transform a FlatCurry constructor or literal to SMT-LIB
+cons2SMT :: SMTInfo -> SymObj -> VarIndex -> SMT.QIdent
 cons2SMT smtInfo tqn@(SymCons qn _) v = case lookupSMTCons tqn smtInfo of
   Nothing -> error $ "FCY2SMTLib.cons2SMT: No SMT-LIB representation for "
                ++ show qn
   Just c  -> SMT.As c (getSMTSort v smtInfo)
-cons2SMT _ (SymLit _) _ = error $ "FCY2SMTLib.cons2SMT: Literals not supported yet"
+cons2SMT _ (SymLit _ _) _ = error $ "FCY2SMTLib.cons2SMT: symbolic literal"
 
 --- Transform a constructor expression into an SMTLib term
 -- toTerm :: SMTInfo -> SymCons -> [VarIndex] -> SMT.Term
@@ -308,7 +309,7 @@ predefTypes = listToBM (<) (<) $ map qualPrel
   ]
 
 --- predefined constructors
-predefCons :: BM SymCons SMT.Ident
+predefCons :: BM SymObj SMT.Ident
 predefCons = listToBM (<) (<) $
   [ (prelSymCons "False" boolType,"false")
   , (prelSymCons "True"  boolType,"true")
@@ -342,8 +343,3 @@ tvarDecl = SMT.DeclareDatatypes [] "TVar" [SMT.Cons "tvar" []]
 --- Sort to represent functional types in SMTLib
 funDecl :: SMT.Command
 funDecl = SMT.DeclareDatatypes [] "Fun" [SMT.Cons "fun" []]
-
--- helper
--- qualify first component of a tuple with "Prelude"
-qualPrel :: (String, b) -> (QName, b)
-qualPrel (x, y) = (prel x, y)

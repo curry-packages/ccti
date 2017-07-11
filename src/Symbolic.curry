@@ -4,7 +4,7 @@ import FlatCurry.Annotated.Types (QName)
 import FlatCurry.Types           (TypeExpr, VarIndex)
 import List                      (nub)
 
-import FlatCurryGoodies          (SymCons (..))
+import FlatCurryGoodies          (SymObj)
 import PrettyPrint
 import SMTLib.Pretty
 import SMTLib.Types              (Command, Term)
@@ -17,7 +17,7 @@ type Trace = [Decision]
 
 type CaseID = VarIndex
 
-data Decision = Decision CaseID BranchNr VarIndex SymCons [VarIndex]
+data Decision = Decision CaseID BranchNr VarIndex SymObj [VarIndex]
   deriving Show
 
 --- Pretty printing
@@ -25,9 +25,9 @@ instance Pretty BranchNr where
   pretty (BNr m n) = int m <> text "/" <> int n
 
 instance Pretty Decision where
-  pretty (Decision cid bnr v symc args)
+  pretty (Decision cid bnr v sobj args)
     =  text "caseID" <+> ppVarIndex cid <> colon
-   <+> tupledSpaced [ text "Branch" <+> pretty bnr, ppVarIndex v, pretty symc
+   <+> tupledSpaced [ text "Branch" <+> pretty bnr, ppVarIndex v, pretty sobj
                     , list (map ppVarIndex args)
                     ]
 

@@ -10,37 +10,103 @@ import FlatCurry.Annotated.Goodies
 import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
 import List                        (find)
-import PrettyPrint
 
---- Symbolic FlatCurry constructor
-data SymCons = SymCons QName TypeExpr
-             | SymLit Literal
+import PrettyPrint
+import Utils
+
+--- Symbolic object
+---   * symbolic FlatCurry constructor
+---   * constraint on symbolic literal
+data SymObj = SymCons QName TypeExpr
+            | SymLit LConstr Literal
   deriving Show
 
-instance Pretty SymCons where
+--- Literal constraint
+data LConstr = E | NE | L | LE | G | GE
+  deriving (Eq, Ord, Show)
+
+--- Negate a literal constraint
+neg :: LConstr -> LConstr
+neg E  = NE
+neg NE = E
+neg L  = GE
+neg LE = G
+neg G  = LE
+neg GE = L
+
+--- Adapt literal constraint due to swapping of argument order
+swap :: LConstr -> LConstr
+swap lcs = case lcs of
+  L  -> G
+  G  -> L
+  LE -> GE
+  GE -> LE
+  _  -> lcs
+
+instance Pretty SymObj where
   pretty (SymCons qn ty) = ppQName qn <+> doubleColon <+> ppTypeExp ty
-  pretty (SymLit      l) = ppLiteral l
+  pretty (SymLit  lcs l) = pretty lcs <+> ppLiteral l
+
+instance Pretty LConstr where
+  pretty E  = text "=="
+  pretty NE = text "/="
+  pretty L   = text "<"
+  pretty LE = text "<="
+  pretty G   = text ">"
+  pretty GE = text ">="
 
 --- Consider only the qualified name when comparing two typed FlatCurry
 --- constructors
-instance Eq SymCons where
-  c1 == c2 = case (c1, c2) of
-    (SymCons qn1 _, SymCons qn2 _) -> qn1 == qn2
-    (SymLit     l1, SymLit     l2) -> l1  == l2
-    _                              -> False
+instance Eq SymObj where
+  o1 == o2 = case (o1, o2) of
+    (SymCons qn1 _ , SymCons qn2   _) -> qn1  == qn2
+    (SymLit lcs1 l1, SymLit  lcs2 l2) -> lcs1 == lcs2 && l1  == l2
+    _                                 -> False
 
 --- Consider only the qualified name when comparing two typed FlatCurry
 --- constructors
-instance Ord SymCons where
+instance Ord SymObj where
   compare c1 c2 = case (c1, c2) of
     (SymCons qn1 _, SymCons qn2 _) -> compare qn1 qn2
-    (SymLit     l1, SymLit     l2) -> compare l1 l2
+    (SymLit   _ l1, SymLit   _ l2) -> compare l1  l2
 
-symCons :: (QName, TypeExpr) -> SymCons
-symCons (qn, ty) = SymCons qn ty
+--- Get the type of a symbolic object
+tyOf :: SymObj -> TypeExpr
+tyOf (SymCons _ ty) = ty
+tyOf (SymLit   _ l) = case l of
+  Intc   _ -> intType
+  Floatc _ -> floatType
+  Charc  _ -> charType
+
+-- symObj :: (QName, TypeExpr) -> AExpr TypeExpr -> SymObj
+-- symObj (qn, ty) e = case e of
+--   AComb ety _ (qf, _) _
+--     | isBoolType ety && qf `elem` cmpLitOps -> LitConstr qn e
+--   _                                         -> SymCons   qn ty
+--  where
+--   cmpLitOps = map prel ["_impl#==#Prelude.Eq#Prelude.Int"]
+
+--- Generate a literal constraint from the given FlatCurry expression,
+--- if possible
+getLConstr :: QName -> AExpr TypeExpr -> Maybe (VarIndex, SymObj)
+getLConstr qn e = case e of
+  AComb ty _ (fn, _) es
+    | isBoolType ty -> do
+      lcs <- fmap (if snd qn == "False" then neg else id) (lookup fn litConstrs)
+      case es of
+        [ALit _ l, AVar _ v] -> return (v, SymLit (swap lcs) l)
+        [AVar _ v, ALit _ l] -> return (v, SymLit lcs l)
+        _                    -> Nothing
+  _                          -> Nothing
+
+--- List of supported literal constraints
+litConstrs :: [(QName, LConstr)]
+litConstrs = map qualPrel [ ("_impl#==#Prelude.Eq#Prelude.Int", E)
+                          , ("_impl#<=#Prelude.Ord#Prelude.Int", LE)
+                          ]
 
 --- Create a typed FlatCurry 'Prelude' constructor
-prelSymCons :: String -> TypeExpr -> SymCons
+prelSymCons :: String -> TypeExpr -> SymObj
 prelSymCons c ty = SymCons (prel c) ty
 
 --- Generate a functional FlatCurry type expression from a list of argument types
@@ -54,6 +120,10 @@ hasName qn f = qn == funcName f
 --- Qualification of Prelude functions
 prel :: String -> QName
 prel f = ("Prelude", f)
+
+--- Qualify first component of a tuple with "Prelude"
+qualPrel :: (String, b) -> (QName, b)
+qualPrel (x, y) = (prel x, y)
 
 --- Annotated FlatCurry expression representing `failed`
 failedExpr :: TypeExpr -> AExpr TypeExpr
@@ -111,7 +181,7 @@ tplType :: [TypeExpr] -> TypeExpr
 tplType tys = TCons (prel "(,)") tys
 
 --- smart constructor for typed tuple constructors in FlatCurry
-mkTplType :: String -> Int -> SymCons
+mkTplType :: String -> Int -> SymObj
 mkTplType n a | a >= 2 = SymCons qn (mkFunType tvars (TCons qn tvars))
   where qn    = prel n
         tvars = map TVar [0 .. a-1]

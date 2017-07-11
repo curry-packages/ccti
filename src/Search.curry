@@ -1,16 +1,16 @@
 module Search where
 
-import FiniteMap                 ( FM, addListToFM, addToFM, delFromFM, elemFM
+import FiniteMap                 ( FM, addListToFM, addToFM_C, delFromFM, elemFM
                                  , emptyFM, lookupFM )
 import FlatCurry.Annotated.Goodies (argTypes)
 import FlatCurry.Annotated.Types
-import List                      (delete, union)
+import List                      (delete, intersect, union)
 
 import CCTOptions                (CCTOpts (..))
 import FCY2SMTLib
 import Eval                      ( CEState (..), ceval, fromSubst, initCEState
                                  , norm )
-import FlatCurryGoodies          (SymCons (..), resArgTypes)
+import FlatCurryGoodies          (SymObj (..), resArgTypes, tyOf)
 import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
@@ -32,8 +32,18 @@ type UVNodes = FM CaseID CaseInfo
 --- Information on case expressions required for the concolic search, namely:
 ---   * numbers of unvisited branches
 ---   * known constructor (qualified identifier and argument sorts)
-data CaseInfo = CaseInfo [Int] [(QIdent, [Sort])]
+data CaseInfo = CaseInfo [Int] ConstrInfo -- [(QIdent, [Sort])]
   deriving Show
+
+--- Information for the generation of path constraints, i.e.
+---   * known constructors
+---   * literal constraint
+data ConstrInfo = KnownCons [(QIdent, [Sort])]
+                | LitConstr (Term -> Term)
+
+instance Show ConstrInfo where
+  show (KnownCons   cons) = "KnownCons " ++ show cons
+  show (LitConstr constr) = "LitConstr " ++ show (constr (tvar 0))
 
 --- Test case data: function call with arguments and corresponding
 --- non-deterministic results
@@ -124,6 +134,15 @@ getSymArgs = gets cssSymArgs
 addTestCase :: TestCase -> CSM ()
 addTestCase tc = modify $ \s -> s { cssTests = tc : cssTests s }
 
+--- Get the constraint information for the given case identifier
+getConstrInfo :: CaseID -> CSM ConstrInfo
+getConstrInfo cid = do
+  uvn <- getUVNodes
+  case lookupFM uvn cid of
+    Nothing                  -> error $
+      "Search.lookupCsInfo: No constraint information for " ++ show cid
+    Just (CaseInfo _ csInfo) -> return csInfo
+
 --------------------------------------------------------------------------------
 
 type UpdSymInfo = SymTree -> UVNodes -> SMTInfo -> (SymTree, UVNodes, SMTInfo)
@@ -137,8 +156,8 @@ processTrace :: Trace -> UpdSymInfo
 processTrace trace tree uvNodes smtInfo
   = prcTrace trace 0 [] [] [] tree uvNodes smtInfo
   where
-  prcTrace []                                               _ _     _  _  st uvn smtEnv = (st, uvn, smtEnv)
-  prcTrace (Decision cid bnr v c@(SymCons _ cty) args : ds) d cidcs cs vs st uvn smtEnv =
+  prcTrace []                                  _ _     _  _  st uvn smtEnv = (st, uvn, smtEnv)
+  prcTrace (Decision cid bnr v sobj args : ds) d cidcs cs vs st uvn smtEnv =
     let -- extended list of required SMT-LIB constant indices
         cidcs'  = cidcs `union` (v : args)
         -- extended list of known variables
@@ -146,25 +165,40 @@ processTrace trace tree uvNodes smtInfo
         -- extended symbolic tree
         st'     = addNode (SymNode d cid cidcs' cs vs v) st
         -- updated type environment
-        smtEnv' = execSMTTrans (updTypeEnv (v:args) cty args) smtEnv -- smtEnv { smtVars = addListToFM_C unifyTypes (smtVars smtEnv) vtys }
-        -- SMT-LIB term representation of selected FlatCurry constructor
-        qi      = cons2SMT smtEnv' c v
+        smtEnv' = execSMTTrans (updTypeEnv (v:args) (tyOf sobj) args) smtEnv
+        -- generate constraint information
+        csInfo  = genCsInfo smtEnv' sobj v args
         -- extended list of path constraints
-        cs'     = cs ++ [tvar v =% qtcomb qi (map tvar args)]
-        -- SMT-LIB sorts of arguments
-        ss      = map (flip getSMTSort smtEnv') args
+        cs'     = cs ++ [genPConstr csInfo v args] -- [tvar v =% qtcomb qi (map tvar args)]
         -- updated unvisited nodes
-        uvn'    = visitBranch cid bnr (qi, ss) uvn
+        uvn'    = visitBranch cid bnr csInfo uvn -- (qi, ss) uvn
     in prcTrace ds (d+1) cidcs' cs' vs' st' uvn' smtEnv'
+
+--- Generate constraint information
+genCsInfo :: SMTInfo -> SymObj -> VarIndex -> [VarIndex] -> ConstrInfo
+genCsInfo smtInfo sobj v args = case sobj of
+  SymCons  _ _ -> KnownCons [(cons2SMT smtInfo sobj v, map (flip getSMTSort smtInfo) args)]
+  SymLit lcs l -> LitConstr ((lcs2SMT lcs) (lit2SMT l))
+
+--- Generate a path constraint
+genPConstr :: ConstrInfo -> VarIndex -> [VarIndex] -> Term
+genPConstr (KnownCons   cons) v args = case cons of
+  [(qi, _)] -> tvar v =% qtcomb qi (map tvar args)
+  _         -> error $ "Search.genPConstr: Invalid constraint info"
+genPConstr (LitConstr constr) v _    = constr (tvar v)
 
 --- Mark a branch as visited during concolic search
 --- by updating the map of unvisited nodes
-visitBranch :: CaseID -> BranchNr -> (QIdent, [Sort]) -> UVNodes -> UVNodes
-visitBranch cid (BNr m n) c uvn = case lookupFM uvn cid of
-  Nothing -> addToFM uvn cid (CaseInfo [b | b <- [1 .. n], b /= m] [c])
-  Just (CaseInfo bs cons) -> addToFM uvn cid (CaseInfo bs' ([c] `union` cons))
+visitBranch :: CaseID -> BranchNr -> ConstrInfo -> UVNodes -> UVNodes
+visitBranch cid (BNr m n) csInfo uvn
+  = addToFM_C updCaseInfo uvn cid (CaseInfo [b | b <- [1 .. n], b /= m] csInfo)
+  where
+  updCaseInfo (CaseInfo bs1 old) (CaseInfo bs2 new)
+    = CaseInfo (bs1 `intersect` bs2) (combine old new)
     where
-    bs' = delete m bs
+    combine ci1 ci2 = case (ci1, ci2) of
+      (KnownCons cons1, KnownCons cons2) -> KnownCons (cons1 `union` cons2)
+      _                                  -> ci1
 
 csearch :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> SMTInfo
         -> AExpr TypeExpr -> IO [TestCase]
@@ -208,7 +242,7 @@ searchLoopN d sub ceState e
   io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
   nxt <- nextSymNode
   case nxt of
-    Nothing -> io (putStrLn "!!! Queue EMPTY !!!") >> return ()
+    Nothing -> return ()
     Just  n -> do
       io $ debugSearch opts $ "Next node: " ++ show n
       cmds    <- genSMTCmds v' n
@@ -259,13 +293,12 @@ hasUnvis cid uv = case lookupFM uv cid of
 --- and the assertion of path constraints for the given symbolic node
 genSMTCmds :: VarIndex -> SymNode -> CSM [Command]
 genSMTCmds v (SymNode _ cid cidcs pcs _ dv) = do
-  uvn     <- getUVNodes
   smtInfo <- getSMTInfo
-  case lookupFM uvn cid of
-    Nothing
-      -> error $ "Search.genSMTCmds: No case information for " ++ show cid
-    Just (CaseInfo _ cons)
-      -> return $ declConsts smtInfo cidcs ++ [assert (pcs ++ noneOf v dv cons)]
+  csInfo  <- getConstrInfo cid
+  let pc = case csInfo of
+             KnownCons cons   -> noneOf v dv cons
+             LitConstr constr -> [tneg (constr (tvar dv))]
+  return $ declConsts smtInfo cidcs ++ [assert (pcs ++ pc)]
 
 --- Select subset of argument variables of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]

@@ -202,9 +202,11 @@ getTrace :: CEM Trace
 getTrace = gets cesTrace
 
 --- Add a decision with symbolic information for case expression `cid` to the trace
-mkDecision :: CaseID -> BranchNr -> VarIndex -> SymCons -> [VarIndex] -> CEM ()
-mkDecision cid bnr v symc args = modify $
-  \s -> s { cesTrace = (Decision cid bnr v symc args) : cesTrace s }
+mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeExpr)
+           -> AExpr TypeExpr -> [VarIndex] -> CEM ()
+mkDecision cid bnr v (qn, ty) e args
+  = let (v', sobj) = maybe (v, SymCons qn ty) id  (getLConstr qn e)
+    in modify $ \s -> s { cesTrace = (Decision cid bnr v' sobj args) : cesTrace s }
 
 --- ----------------------------------------------------------------------------
 
@@ -356,7 +358,7 @@ hnfCase ct e bs = do
     AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        mkDecision cid (BNr n bcnt) vi (symCons c) (map varNr es)
+        mkDecision cid (BNr n bcnt) vi c e' (map varNr es)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -372,7 +374,7 @@ hnfCase ct e bs = do
           hnf be
         guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
-          mkDecision cid (BNr n bcnt) vi (symCons c) ys
+          mkDecision cid (BNr n bcnt) vi c e' ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
