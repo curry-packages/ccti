@@ -3,7 +3,7 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version July 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
@@ -41,13 +41,15 @@ data Result a
 ---   * the concrete heap containing variable bindings,
 ---   * a list of all defined function declarations,
 ---   * an index for fresh variables,
----   * a trace of symbolic information for case branches.
+---   * a trace of symbolic information for case branches and
+---   * a counter of the remaining number of evaluation steps
 data CEState = CEState
   { cesCCTOpts :: CCTOpts
   , cesHeap    :: Heap
   , cesFuncs   :: [AFuncDecl TypeExpr]
   , cesFresh   :: VarIndex
   , cesTrace   :: Trace
+  , cesSteps   :: Int
   }
 
 --- Initial state for concolic evaluation
@@ -59,6 +61,7 @@ initCEState opts sub fs v = CEState
   , cesFuncs   = fs
   , cesFresh   = v
   , cesTrace   = []
+  , cesSteps   = 0
   }
 
 --- Generate a Heap from a given Substitution
@@ -73,12 +76,16 @@ traceStep e x = do
   opts <- getOpts
   h    <- getHeap
   t    <- getTrace
+  s    <- countStep
   traceEval opts
-    (pPrint $ vsep [ text "Heap:"           <+> ppHeap h
+    (pPrint $ vsep [ text "Evaluation step:" <+> int s
+                   , text "Heap:"           <+> ppHeap h
                    , text "Symbolic Trace:" <+> listSpaced (map pretty t)
                    , text "Expression:"     <+> ppExp e
                    ])
-    x
+    (if optEvalSteps opts - s + 1 == 0
+       then error "Maximum number of evaluation steps exceeded"
+       else x)
 
 traceSym :: CEState -> a -> a
 traceSym s = traceInfo (cesCCTOpts s)
@@ -210,6 +217,15 @@ mkDecision cid bnr v (qn, ty) e args
 
 --- ----------------------------------------------------------------------------
 
+countStep :: CEM Int
+countStep = do
+  s <- get
+  let n = cesSteps s + 1
+  put s { cesSteps = n }
+  return n
+
+--- ----------------------------------------------------------------------------
+
 --- concolic evaluation
 ceval :: AExpr TypeExpr -> CEState -> ([AExpr TypeExpr], [Trace], VarIndex)
 ceval e s = fromResult $ runCEM (nf e) s
@@ -253,15 +269,15 @@ nf e = hnf e >>= \e' -> case e' of
 
 --- Evaluate given FlatCurry expression to head normal form
 hnf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
-hnf exp = case exp of
-  AVar        ty v -> traceStep exp $ hnfVar  ty v
-  ALit        ty l -> traceStep exp $ hnfLit  ty l
-  AComb ty ct f es -> traceStep exp $ hnfComb ty ct f es
-  ALet      _ bs e -> traceStep exp $ hnfLet  bs e
-  AFree     _ vs e -> traceStep exp $ hnfFree vs e
-  AOr      _ e1 e2 -> traceStep exp $ hnfOr   e1 e2
-  ACase  _ ct e bs -> traceStep exp $ hnfCase ct e bs
-  ATyped     _ e _ -> traceStep exp $ hnf     e
+hnf exp = traceStep exp $ case exp of
+  AVar        ty v -> hnfVar  ty v
+  ALit        ty l -> hnfLit  ty l
+  AComb ty ct f es -> hnfComb ty ct f es
+  ALet      _ bs e -> hnfLet  bs e
+  AFree     _ vs e -> hnfFree vs e
+  AOr      _ e1 e2 -> hnfOr   e1 e2
+  ACase  _ ct e bs -> hnfCase ct e bs
+  ATyped     _ e _ -> hnf     e
 
 --- Concolic evaluation of a variable
 hnfVar :: TypeExpr -> VarIndex -> CEM (AExpr TypeExpr)

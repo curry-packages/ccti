@@ -2,7 +2,7 @@
 --- Command line options for the concolic testing tool.
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version July 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
   (CCTOpts (..), Strategy (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
@@ -28,6 +28,7 @@ data CCTOpts = CCTOpts
   , optVerbosity   :: Verbosity
   , optStrategy    :: Strategy
   , optSearchDepth :: Int
+  , optEvalSteps   :: Int
   }
 
 --- default options
@@ -43,6 +44,7 @@ defCCTOpts = CCTOpts
   , optVerbosity   = Status
   , optStrategy    = DFS
   , optSearchDepth = 10
+  , optEvalSteps   = 50
   }
 
 --- Verbosity level
@@ -102,6 +104,9 @@ options =
   , Option ['d'] ["search-depth"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optSearchDepth = read arg }) "n")
       "maximal search depth"
+  , Option ['s'] ["eval-steps"]
+      (ReqArg (onOptsArg $ \arg opts -> opts { optEvalSteps = read arg }) "n")
+      "maximal number of evaluation steps, set to negative number to deactivate"
   ]
 
 --- Verbosity descriptions
