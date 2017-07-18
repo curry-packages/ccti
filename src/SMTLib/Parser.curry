@@ -4,7 +4,7 @@
 --- namely command responses.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version July 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Parser where
 
@@ -185,8 +185,10 @@ parseTerm = Parser $ \tokens -> case tokens of
 --- parser for parenthesized terms
 parseParenTerm :: SMTParser SMT.Term
 parseParenTerm
+     -- parser for negative numbers
+  =  yield (SMT.TConst . SMT.Num) <*> parseNum <* terminal RParen
      -- parser for qualified identifiers
-  =  terminal KW_as *> yield SMT.TComb <*> (yield SMT.As <*> parseSym
+ <|> terminal KW_as *> yield SMT.TComb <*> (yield SMT.As <*> parseSym
                    <*> parseSort) <*> yield [] <* terminal RParen
      -- parser for complex terms
  <|> yield SMT.TComb <*> parseQIdent <*> some parseTerm <* terminal RParen

@@ -44,7 +44,7 @@ defCCTOpts = CCTOpts
   , optVerbosity   = Status
   , optStrategy    = DFS
   , optSearchDepth = 10
-  , optEvalSteps   = 50
+  , optEvalSteps   = 500
   }
 
 --- Verbosity level

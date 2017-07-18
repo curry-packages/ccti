@@ -2,7 +2,7 @@
 --- This module provides a simple scanner for the SMT-LIB language.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version July 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Scanner where
 
@@ -152,22 +152,22 @@ keywords = listToFM (<)
 scan :: String -> [Token]
 scan ""     = []
 scan s@(c:cs) = case c of
-  '('                           -> LParen     : scan cs
-  ')'                           -> RParen     : scan cs
-  '!'                           -> Bang       : scan cs
-  '_'                           -> Underscore : scan cs
-  ':'                           -> Colon      : scan cs
-  '"'                           -> DQuote     : scan cs
-  ','                           -> Comma      : scan cs
-  ';'                           -> scanLineCmt cs
-  _ | isNumber c                -> scanNum s
-    | isAlpha  c || isSpecial c -> scanKWOrId s
-    | isSpace  c                -> scan cs
-    | otherwise                 -> error $ "Scanner.scan: Unexpected character "
+  '('                          -> LParen     : scan cs
+  ')'                          -> RParen     : scan cs
+  '!'                          -> Bang       : scan cs
+  '_'                          -> Underscore : scan cs
+  ':'                          -> Colon      : scan cs
+  '"'                          -> DQuote     : scan cs
+  ','                          -> Comma      : scan cs
+  ';'                          -> scanLineCmt cs
+  _ | isInt   c                -> scanInt s
+    | isAlpha c || isSpecial c -> scanKWOrId s
+    | isSpace c                -> scan cs
+    | otherwise                -> error $ "Scanner.scan: Unexpected character "
                                      ++ [c] ++ "\nRemaining tokens: " ++ cs
 
-isNumber :: Char -> Bool
-isNumber c = isDigit c || c == '-'
+isInt :: Char -> Bool
+isInt c = isDigit c || c == '-'
 
 isSpecial :: Char -> Bool
 isSpecial c = c `elem` [ '+', '-', '/', '*', '=', '!', '.', '$', '_', '~', '&'
@@ -182,8 +182,16 @@ scanLineCmt (c:cs) = case c of
   _    -> scanLineCmt cs
 
 scanNum :: String -> [Token]
-scanNum cs = let (n, rest) = span isNumber cs
+scanNum cs = let (n, rest) = span isDigit cs
              in Num (read n) : scan rest
+
+scanInt :: String -> [Token]
+scanInt cs = case cs of
+  '-' : rs -> let num = dropWhile (not . isDigit) rs
+              in case scanNum num of
+                   Num n : ts -> Num (- n) : ts
+                   ts         -> error $ "Scanner.scanInt: Expected token sequence starting with Num n but got: " ++ show ts
+  _        -> scanNum cs
 
 scanKWOrId :: String -> [Token]
 scanKWOrId cs = let (i, rest) = span (\c -> isAlphaNum c || isSpecial c) cs
