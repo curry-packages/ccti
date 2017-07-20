@@ -2,7 +2,7 @@
 --- This module provides some additional goodies for annotated FlatCurry.
 ---
 --- @author  Jan Tikovsky
---- @version May 2017
+--- @version July 2017
 --- ----------------------------------------------------------------------------
 module FlatCurryGoodies where
 
@@ -13,6 +13,8 @@ import List                        (find)
 
 import PrettyPrint
 import Utils
+
+import Debug (trace)
 
 --- Symbolic object
 ---   * symbolic FlatCurry constructor
@@ -78,18 +80,10 @@ tyOf (SymLit   _ l) = case l of
   Floatc _ -> floatType
   Charc  _ -> charType
 
--- symObj :: (QName, TypeExpr) -> AExpr TypeExpr -> SymObj
--- symObj (qn, ty) e = case e of
---   AComb ety _ (qf, _) _
---     | isBoolType ety && qf `elem` cmpLitOps -> LitConstr qn e
---   _                                         -> SymCons   qn ty
---  where
---   cmpLitOps = map prel ["_impl#==#Prelude.Eq#Prelude.Int"]
-
 --- Generate a literal constraint from the given FlatCurry expression,
 --- if possible
 getLConstr :: QName -> AExpr TypeExpr -> Maybe (VarIndex, SymObj)
-getLConstr qn e = case e of
+getLConstr qn e = trace ("getLC: " ++ show qn ++ " " ++ show e) $ case e of
   AComb ty _ (fn, _) es
     | isBoolType ty -> do
       lcs <- fmap (if snd qn == "False" then neg else id) (lookup fn litConstrs)
@@ -101,8 +95,12 @@ getLConstr qn e = case e of
 
 --- List of supported literal constraints
 litConstrs :: [(QName, LConstr)]
-litConstrs = map qualPrel [ ("_impl#==#Prelude.Eq#Prelude.Int", E)
+litConstrs = map qualPrel [ ("_impl#==#Prelude.Eq#Prelude.Int" , E )
+                          , ("_impl#/=#Prelude.Eq#Prelude.Int" , NE)
+                          , ("_impl#<#Prelude.Ord#Prelude.Int" , L )
                           , ("_impl#<=#Prelude.Ord#Prelude.Int", LE)
+                          , ("_impl#>#Prelude.Ord#Prelude.Int" , G )
+                          , ("_impl#>=#Prelude.Ord#Prelude.Int", GE)
                           ]
 
 --- Create a typed FlatCurry 'Prelude' constructor
