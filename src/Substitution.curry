@@ -2,12 +2,14 @@
 --- This module defines substitutions on type annotated FlatCurry expressions
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module Substitution where
 
 import FiniteMap
 import FlatCurry.Annotated.Types
+
+import FlatCurryGoodies          (TypeAnn)
 
 --- Representation of substitutions
 type Subst = FM
@@ -90,7 +92,7 @@ instance SubstBy TypeExpr where
 
 
 --- substitution on type annotated FlatCurry expressions
-type AExpSubst = Subst VarIndex (AExpr TypeExpr)
+type AExpSubst = Subst VarIndex (AExpr TypeAnn)
 
 --- substitution on FlatCurry type expressions
 type TypeSubst = Subst TVarIndex TypeExpr

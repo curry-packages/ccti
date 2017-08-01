@@ -2,19 +2,43 @@
 --- This module provides some additional goodies for annotated FlatCurry.
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module FlatCurryGoodies where
 
 import FlatCurry.Annotated.Goodies
 import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
-import List                        (find)
+import List                        (find, isPrefixOf)
 
 import PrettyPrint
 import Utils
 
-import Debug (trace)
+--- Extended FlatCurry annotation for concolic testing providing
+---   * case identifiers and
+---   * literal flags
+type IDAnn a = (a, Maybe VarIndex, Bool)
+
+--- Concolic testing annotation with type information
+type TypeAnn = IDAnn TypeExpr
+
+--- Extend given annotation to default `IDAnn` annotation
+extendAnn :: a -> IDAnn a
+extendAnn ann = (ann, Nothing, False)
+
+--- Select type annotation
+tyAnn :: TypeAnn -> TypeExpr
+tyAnn = fst3
+
+--- Select case identifier annotation
+cidAnn :: TypeAnn -> VarIndex
+cidAnn ann = case snd3 ann of
+  Nothing  -> error "FlatCurryGoodies.cidAnn: No identifier annotation found"
+  Just cid -> cid
+
+--- Select literal annotation
+litAnn :: TypeAnn -> Bool
+litAnn = trd3
 
 --- Symbolic object
 ---   * symbolic FlatCurry constructor
@@ -52,9 +76,9 @@ instance Pretty SymObj where
 instance Pretty LConstr where
   pretty E  = text "=="
   pretty NE = text "/="
-  pretty L   = text "<"
+  pretty L  = text "<"
   pretty LE = text "<="
-  pretty G   = text ">"
+  pretty G  = text ">"
   pretty GE = text ">="
 
 --- Consider only the qualified name when comparing two typed FlatCurry
@@ -83,7 +107,7 @@ tyOf (SymLit   _ l) = case l of
 --- Generate a literal constraint from the given FlatCurry expression,
 --- if possible
 getLConstr :: QName -> AExpr TypeExpr -> Maybe (VarIndex, SymObj)
-getLConstr qn e = trace ("getLC: " ++ show qn ++ " " ++ show e) $ case e of
+getLConstr qn e = case (rmvApplies e) of
   AComb ty _ (fn, _) es
     | isBoolType ty -> do
       lcs <- fmap (if snd qn == "False" then neg else id) (lookup fn litConstrs)
@@ -93,14 +117,31 @@ getLConstr qn e = trace ("getLC: " ++ show qn ++ " " ++ show e) $ case e of
         _                    -> Nothing
   _                          -> Nothing
 
+rmvApplies :: AExpr TypeExpr -> AExpr TypeExpr
+rmvApplies = rmvApplies' []
+  where
+  rmvApplies' args e = case e of
+    AComb _ ct qn es
+      | isApplyCall e  -> case es of
+                            [f,arg] -> rmvApplies' (arg:args) f
+                            _       -> error "IdentifyCases.rmvApplies"
+      | not (null args) -> AComb boolType ct qn args
+    _                   -> e
+
+isApplyCall :: AExpr a -> Bool
+isApplyCall e = case e of
+  AComb _ FuncCall qn _ -> snd (fst qn) == "apply"
+  _                     -> False
+
+
 --- List of supported literal constraints
 litConstrs :: [(QName, LConstr)]
-litConstrs = map qualPrel [ ("_impl#==#Prelude.Eq#Prelude.Int" , E )
-                          , ("_impl#/=#Prelude.Eq#Prelude.Int" , NE)
-                          , ("_impl#<#Prelude.Ord#Prelude.Int" , L )
-                          , ("_impl#<=#Prelude.Ord#Prelude.Int", LE)
-                          , ("_impl#>#Prelude.Ord#Prelude.Int" , G )
-                          , ("_impl#>=#Prelude.Ord#Prelude.Int", GE)
+litConstrs = map qualPrel [ ("_==" , E )
+                          , ("_/=" , NE)
+                          , ("_<" , L )
+                          , ("_<=", LE)
+                          , ("_>" , G )
+                          , ("_>=", GE)
                           ]
 
 --- Create a typed FlatCurry 'Prelude' constructor
@@ -123,60 +164,113 @@ prel f = ("Prelude", f)
 qualPrel :: (String, b) -> (QName, b)
 qualPrel (x, y) = (prel x, y)
 
+--- Check whether the qualified name represents a dictionary
+isDict :: QName -> Bool
+isDict (_, n) = "_Dict" `isPrefixOf` n
+
 --- Annotated FlatCurry expression representing `failed`
-failedExpr :: TypeExpr -> AExpr TypeExpr
-failedExpr ty = AComb ty FuncCall ((prel "failed"), ty) []
+failedExpr :: TypeAnn -> AExpr TypeAnn
+failedExpr ann = AComb ann FuncCall ((prel "failed"), ann) []
 
 --- smart constructor for a nondeterministic choice in FlatCurry
-mkOr :: AExpr TypeExpr -> AExpr TypeExpr -> AExpr TypeExpr
-mkOr e1 e2 | e1 == failedExpr ty = e2
-           | e2 == failedExpr ty = e1
-           | otherwise           = AOr ty e1 e2
-  where ty = annExpr e1
+mkOr :: AExpr TypeAnn -> AExpr TypeAnn -> AExpr TypeAnn
+mkOr e1 e2 | e1 == failedExpr ann = e2
+           | e2 == failedExpr ann = e1
+           | otherwise            = AOr ann e1 e2
+  where ann = annExpr e1
 
---- Annotated FlatCurry type expression representing `Bool`
+--- ----------------------------------------------------------------------------
+--- Representation of some basic types in FlatCurry
+--- ----------------------------------------------------------------------------
+
 boolType :: TypeExpr
 boolType = TCons (prel "Bool") []
 
---- Annotated FlatCurry type expression representing `Int`
 intType :: TypeExpr
 intType = TCons (prel "Int") []
 
---- Annotated FlatCurry type expression representing `Char`
 charType :: TypeExpr
 charType = TCons (prel "Char") []
 
---- Annotated FlatCurry type expression representing `Float`
 floatType :: TypeExpr
 floatType = TCons (prel "Float") []
 
---- Annotated FlatCurry type expression representing `Bool -> Bool -> Bool`
-ampType :: TypeExpr
-ampType = FuncType boolType (FuncType boolType boolType)
-
---- Annotated FlatCurry type expression representing `a -> a -> Bool`
-unifyType :: TypeExpr -> TypeExpr
-unifyType ty = FuncType ty (FuncType ty boolType)
-
---- Annotated FlatCurry type expression representing `Bool -> a -> a`
-condType :: TypeExpr -> TypeExpr
-condType ty = FuncType boolType (FuncType ty ty)
-
---- Annotated FlatCurry expression representing `True`
-trueExpr :: AExpr TypeExpr
-trueExpr = AComb boolType ConsCall (prel "True", boolType) []
-
---- Annotated FlatCurry expression representing `False`
-falseExpr :: AExpr TypeExpr
-falseExpr = AComb boolType ConsCall (prel "False", boolType) []
-
---- Annotated FlatCurry type constructor for lists
 listType :: TypeExpr -> TypeExpr
 listType ty = TCons (prel "[]") [ty]
 
---- Annotated FlatCurry type constructor for tuples
-tplType :: [TypeExpr] -> TypeExpr
-tplType tys = TCons (prel "(,)") tys
+--- Extended annotation for `()`
+unitType :: TypeExpr
+unitType = TCons (prel "()") []
+
+--- ----------------------------------------------------------------------------
+--- Representation of extended annotations
+--- ----------------------------------------------------------------------------
+
+--- Extended annotation for `Bool`
+boolAnn :: TypeAnn
+boolAnn = extendAnn boolType
+
+--- Extended annotation for `Int`
+intAnn :: TypeAnn
+intAnn = extendAnn intType
+
+--- Extended annotation for `Char`
+charAnn :: TypeAnn
+charAnn = extendAnn $ TCons (prel "Char") []
+
+--- Extended annotation for `Float`
+floatAnn :: TypeAnn
+floatAnn = extendAnn floatType
+
+--- Extended annotation for the list type constructor
+listAnn :: TypeExpr -> TypeAnn
+listAnn = extendAnn . listType
+
+--- Extended annotation for the tuple type constructor
+tplAnn :: [TypeExpr] -> TypeAnn
+tplAnn tys = extendAnn $ TCons (prel "(,)") tys
+
+--- Extended annotations of Prelude functions
+
+--- Extended annotation for type `Bool -> a -> a`
+condAnn :: TypeExpr -> TypeAnn
+condAnn ty = extendAnn $ FuncType boolType (FuncType ty ty)
+
+--- Extended annotation for type `Bool -> Bool -> Bool`
+ampAnn :: TypeAnn
+ampAnn = extendAnn $ FuncType boolType (FuncType boolType boolType)
+
+--- Extended annotation for type `a -> a -> Bool`
+unifyAnn :: TypeAnn -> TypeAnn
+unifyAnn ann = extendAnn $ FuncType ty (FuncType ty boolType)
+  where ty = tyAnn ann
+
+--- ----------------------------------------------------------------------------
+--- FlatCurry expressions
+--- ----------------------------------------------------------------------------
+
+--- Annotated FlatCurry expression representing `True`
+trueExpr :: AExpr TypeAnn
+trueExpr = AComb boolAnn ConsCall (prel "True", boolAnn) []
+
+--- Annotated FlatCurry expression representing `False`
+falseExpr :: AExpr TypeAnn
+falseExpr = AComb boolAnn ConsCall (prel "False", boolAnn) []
+
+--- Annotated FlatCurry expression representing `[]`
+nil :: AExpr TypeAnn
+nil = AComb ann  ConsCall (prel "[]", ann) []
+  where ann = listAnn (TVar 0)
+
+--- Annotated FlatCurry expression representing `:`
+cons :: TypeExpr -> [AExpr TypeAnn] -> AExpr TypeAnn
+cons ty = AComb ann ConsCall ((prel ":"), ann)
+  where ann = listAnn ty
+
+--- FlatCurry expression representing `(,)`
+tpl :: [TypeExpr] -> [AExpr TypeAnn] -> AExpr TypeAnn
+tpl tys = AComb ann ConsCall ((prel "(,)"), ann)
+  where ann = tplAnn tys
 
 --- smart constructor for typed tuple constructors in FlatCurry
 mkTplType :: String -> Int -> SymObj
@@ -184,31 +278,12 @@ mkTplType n a | a >= 2 = SymCons qn (mkFunType tvars (TCons qn tvars))
   where qn    = prel n
         tvars = map TVar [0 .. a-1]
 
---- Annotated FlatCurry type expression representing `Bool`
-unitType :: TypeExpr
-unitType = TCons (prel "()") []
-
---- Annotated FlatCurry expression representing `()`
-unit :: AExpr TypeExpr
-unit = AComb unitType ConsCall (prel "()", unitType) []
-
---- Annotated FlatCurry expression representing `[]`
-nil :: AExpr TypeExpr
-nil = AComb ty  ConsCall (prel "[]", ty) []
-  where ty = listType (TVar 0)
-
---- Annotated FlatCurry expression representing `:`
-cons :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
-cons ty = AComb lty ConsCall ((prel ":"), lty)
-  where lty = listType ty
-
---- FlatCurry expression representing `(,)`
-tpl :: TypeExpr -> [AExpr TypeExpr] -> AExpr TypeExpr
-tpl ty = AComb ty ConsCall ((prel "(,)"), ty)
-
 --- Check if the given FlatCurry type is a boolean type
 isBoolType :: TypeExpr -> Bool
 isBoolType ty = ty == boolType
+
+hasBoolType :: AExpr TypeAnn -> Bool
+hasBoolType e = tyAnn (annExpr e) == boolType
 
 --- Check if the given FlatCurry expression is a boolean conjunction
 isConj :: AExpr a -> Bool
@@ -222,13 +297,17 @@ isDisj e = case e of
   AComb _ _ (qn, _) _ -> qn == prel "||"
   _                   -> False
 
---- FlatCurry `True` pattern
-truePat :: APattern TypeExpr
-truePat = APattern boolType (prel "True", boolType) []
+--- ----------------------------------------------------------------------------
+--- FlatCurry pattern
+--- ----------------------------------------------------------------------------
 
 --- FlatCurry `True` pattern
-falsePat :: APattern TypeExpr
-falsePat = APattern boolType (prel "False", boolType) []
+truePat :: APattern TypeAnn
+truePat = APattern boolAnn (prel "True", boolAnn) []
+
+--- FlatCurry `False` pattern
+falsePat :: APattern TypeAnn
+falsePat = APattern boolAnn (prel "False", boolAnn) []
 
 --- Get the result type followed by the argument types in given order
 resArgTypes :: TypeExpr -> [TypeExpr]
@@ -295,14 +374,14 @@ isPartCall ct = case ct of
 
 --- Combine given expressions lists with `=:=` or `=:<=` and resulting
 --- unifications with `&`
-combine :: QName -> QName -> AExpr TypeExpr -> [AExpr TypeExpr]
-        -> [AExpr TypeExpr] -> AExpr TypeExpr
+combine :: QName -> QName -> AExpr TypeAnn -> [AExpr TypeAnn]
+        -> [AExpr TypeAnn] -> AExpr TypeAnn
 combine amp uni def es1 es2
   | null eqs  = def
-  | otherwise = foldr1 (mkCall (const ampType) amp) eqs
+  | otherwise = foldr1 (mkCall (const ampAnn) amp) eqs
   where
-  eqs                = zipWith (mkCall unifyType uni) es1 es2
-  mkCall tc qn e1 e2 = AComb boolType FuncCall (qn, tc (annExpr e1)) [e1, e2]
+  eqs                = zipWith (mkCall unifyAnn uni) es1 es2
+  mkCall tc qn e1 e2 = AComb boolAnn FuncCall (qn, tc (annExpr e1)) [e1, e2]
 
 --- Get the rhs expression of the main function of the given FlatCurry program
 getMainBody :: AProg a -> Maybe (AExpr a)
@@ -312,13 +391,13 @@ getMainBody (AProg m _ _ fs _) = case findFunc (m, "main") fs of
   _                     -> Nothing
 
 --- Generate a call of the main function of the given module
-mainCall :: String -> TypeExpr -> AExpr TypeExpr
-mainCall m ty = AComb (resultType ty) FuncCall ((m, "main"), ty) []
+-- mainCall :: String -> TypeExpr -> AExpr TypeExpr
+-- mainCall m ty = AComb (resultType ty) FuncCall ((m, "main"), ty) []
 
 --- Conversion of Curry types into their FlatCurry representation
 class ToFCY a where
-  toFCY   :: a    -> AExpr TypeExpr
-  fromFCY :: AExpr TypeExpr -> a
+  toFCY   :: a    -> AExpr TypeAnn
+  fromFCY :: AExpr TypeAnn -> a
 
 instance ToFCY Bool where
   toFCY False = falseExpr
@@ -330,21 +409,21 @@ instance ToFCY Bool where
     _                                             -> error "fromFCY: no boolean"
 
 instance ToFCY Int where
-  toFCY = ALit intType . Intc
+  toFCY = ALit intAnn . Intc
 
   fromFCY e = case e of
     ALit _ (Intc x) -> x
     _               -> error "fromFCY: no integer"
 
 instance ToFCY Char where
-  toFCY = ALit charType . Charc
+  toFCY = ALit charAnn . Charc
 
   fromFCY e = case e of
     ALit _ (Charc c) -> c
     _                -> error "fromFCY: no character"
 
 instance ToFCY Float where
-  toFCY = ALit floatType . Floatc
+  toFCY = ALit floatAnn . Floatc
 
   fromFCY e = case e of
     ALit _ (Floatc f) -> f
@@ -354,7 +433,7 @@ instance ToFCY a => ToFCY [a] where
   toFCY []     = nil
   toFCY (x:xs) = cons ty [x', toFCY xs]
     where x' = toFCY x
-          ty = annExpr x'
+          ty = tyAnn (annExpr x')
 
   fromFCY e = case e of
     AComb _ ConsCall (("Prelude", "[]"), _) []       -> []
@@ -362,10 +441,10 @@ instance ToFCY a => ToFCY [a] where
     _                                                -> error "fromFCY: no list"
 
 instance (ToFCY a, ToFCY b) => ToFCY (a, b) where
-  toFCY (x, y) = tpl tty [x', y']
+  toFCY (x, y) = tpl tys [x', y']
     where x'  = toFCY x
           y'  = toFCY y
-          tty = tplType [annExpr x', annExpr y']
+          tys = map (tyAnn . annExpr) [x', y']
 
   fromFCY e = case e of
     AComb _ ConsCall (("Prelude", "(,)"), _) [e1, e2] -> (fromFCY e1, fromFCY e2)

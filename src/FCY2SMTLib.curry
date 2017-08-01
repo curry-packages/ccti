@@ -6,7 +6,7 @@
 --- versa.
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
@@ -17,6 +17,7 @@ import FlatCurry.Annotated.Goodies   (argTypes, resultType)
 import List                          (isPrefixOf)
 
 import           Bimap
+import           FCYFunctorInstances
 import           FlatCurryGoodies
 import           PrettyPrint hiding  (compose)
 import           SMTLib.Goodies
@@ -258,12 +259,12 @@ cons2SMT _ (SymLit _ _) _ = error $ "FCY2SMTLib.cons2SMT: symbolic literal"
 
 
 --- Transform an SMT-LIB term into a FlatCurry expression
-fromTerm :: SMTInfo -> VarIndex -> SMT.Term -> AExpr TypeExpr
-fromTerm smtInfo vi t = fromTerm' (getFCYType vi smtInfo) t
+fromTerm :: SMTInfo -> VarIndex -> SMT.Term -> AExpr TypeAnn
+fromTerm smtInfo vi t = fmap extendAnn $ fromTerm' (getFCYType vi smtInfo) t
  where
   fromTerm' rty t' = case t' of
     SMT.TComb qi ts
-      | i == "tvar" -> unit
+      | i == "tvar" -> AComb unitType ConsCall (prel "()", unitType) []
       | otherwise   -> case lookupFCYCons i smtInfo of
         Just (SymCons qn ty) ->
           let ty' = subst (unify [(resultType ty, rty)]) ty

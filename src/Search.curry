@@ -10,7 +10,8 @@ import CCTOptions                (CCTOpts (..))
 import FCY2SMTLib
 import Eval                      ( CEState (..), ceval, fromSubst, initCEState
                                  , norm )
-import FlatCurryGoodies          (SymObj (..), resArgTypes, tyOf)
+import FCYFunctorInstances
+import FlatCurryGoodies          (TypeAnn, SymObj (..), resArgTypes, tyOf)
 import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
@@ -24,7 +25,7 @@ import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , subst)
 import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
                                  , SymNode (..), Trace, ppTrace, rnmTrace )
-import Utils                     (mapM, mapM_, unlessM, whenM)
+import Utils                     (fst3, mapM, mapM_, unlessM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type UVNodes = FM CaseID CaseInfo
@@ -217,8 +218,8 @@ visitBranch cid (BNr m n) ci uvn
       (KnownCons cons1, KnownCons cons2) -> KnownCons (cons1 `union` cons2)
       _                                  -> ci1
 
-csearch :: CCTOpts -> [AFuncDecl TypeExpr] -> VarIndex -> SMTInfo
-        -> AExpr TypeExpr -> IO [TestCase]
+csearch :: CCTOpts -> [AFuncDecl TypeAnn] -> VarIndex -> SMTInfo
+        -> AExpr TypeAnn -> IO [TestCase]
 csearch opts fs v smtInfo e = do
   -- prepare main expression for concolic search
   let (sub, e', v') = norm v e
@@ -234,11 +235,11 @@ csearch opts fs v smtInfo e = do
   dumpSMT opts $ showSMT $ trace $ cssSession s
   return (cssTests s)
 
-searchLoop :: AExpSubst -> CEState -> AExpr TypeExpr -> CSM ()
+searchLoop :: AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
 searchLoop = searchLoopN 10
 
 --- main loop of concolic search
-searchLoopN :: Int -> AExpSubst -> CEState -> AExpr TypeExpr -> CSM ()
+searchLoopN :: Int -> AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
 searchLoopN d sub ceState e
   | d == 0    = return ()
   | otherwise = do
@@ -247,7 +248,8 @@ searchLoopN d sub ceState e
   -- we need to rename trace variables due to possible naming conflicts
   -- in non-deterministic branches
   (rs, ts, v') <- renameTraces (ceval e ceState)
-  let tcase = (subst sub e, rs)
+  -- TODO: Simplify conversion
+  let tcase = (fmap fst3 (subst sub e), map (fmap fst3) rs)
   io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
   io $ debugSearch opts $
@@ -276,8 +278,8 @@ searchLoopN d sub ceState e
           searchLoopN (d-1) sub' ceState' e
 
 --- Renaming of trace variables
-renameTraces :: ([AExpr TypeExpr], [Trace], VarIndex)
-             -> CSM ([AExpr TypeExpr], [Trace], VarIndex)
+renameTraces :: ([AExpr TypeAnn], [Trace], VarIndex)
+             -> CSM ([AExpr TypeAnn], [Trace], VarIndex)
 renameTraces info@(res, traces, v)
   | length traces < 2 = return info
   | otherwise         = do

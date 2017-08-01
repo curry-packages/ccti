@@ -62,6 +62,18 @@ zip3 xs ys zs = case xs of
                       []   -> []
                       c:cs -> (a, b, c) : zip3 as bs cs
 
+fst3 :: (a, b, c) -> a
+fst3 (x, _, _) = x
+
+snd3 :: (a, b, c) -> b
+snd3 (_, y, _) = y
+
+trd3 :: (a, b, c) -> c
+trd3 (_, _, z) = z
+
+trTpl3 :: (a -> b) -> (c -> d) -> (e -> f) -> (a, c, e) -> (b, d, f)
+trTpl3 f g h (x, y, z) = (f x, g y, h z)
+
 -- TODO: Remove when there is a functor instance for Maybe
 instance Functor Maybe where
   fmap _ Nothing  = Nothing

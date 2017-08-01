@@ -17,10 +17,11 @@ import ReadShowTerm              (readUnqualifiedTerm)
 import System                    (exitWith, getProgName)
 
 import CCTOptions                (CCTOpts (..), Strategy (..), badUsage, getOpts)
+import FCYFunctorInstances
 import FCY2SMTLib                (fcy2SMT)
-import FlatCurryGoodies          (getMainBody, printExpr)
+import FlatCurryGoodies          (extendAnn, getMainBody, printExpr)
 import IdentifyCases             (idCases)
-import Output                    (info, status)
+import Output                    (debug, status)
 import PrettyPrint hiding        ((</>))
 import Search                    (csearch)
 
@@ -43,18 +44,16 @@ main = do
       (ts, fs) <- getTysFuns m
       status opts "Annotating case expressions with fresh identifiers"
       let (fs', v) = idCases fs
-      info opts (pPrint $ text "Functions:" <+> ppFuncDecls (filter (isLocal m) fs'))
+          e'       = fmap extendAnn e
+      debug opts (pPrint $ text "Annotated Functions:" <+> ppFuncDecls  fs')
       status opts "Generating SMT-LIB declarations for FlatCurry types"
       let smtInfo  = fcy2SMT ts
-      info opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
+      debug opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
       status opts "Beginning with concolic search"
       testCases <- case optStrategy opts of
 --                      Narrowing -> narrow  opts fs' v e
-                     DFS       -> csearch opts fs' v smtInfo e
+                     DFS       -> csearch opts fs' v smtInfo e'
       putStrLn $ pPrint $ vsep $ map ppTestCase testCases
-
-isLocal :: String -> AFuncDecl TypeExpr -> Bool
-isLocal m (AFunc qn _ _ _ _) = m == fst qn
 
 -- TODO: nicht transformierte Funktionen des Main Moduls werden verwendet,
 -- Aufruf von getTysFuns anpassen

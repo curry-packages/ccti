@@ -3,7 +3,7 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
@@ -12,6 +12,7 @@ import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
 
 import CCTOptions                  (CCTOpts (..), Strategy (..))
+import FCYFunctorInstances
 import FlatCurryGoodies
 import Heap
 import Output                      (traceEval, traceInfo)
@@ -41,27 +42,31 @@ data Result a
 ---   * the concrete heap containing variable bindings,
 ---   * a list of all defined function declarations,
 ---   * an index for fresh variables,
+---   * a flag which indicates whether a boolean case expression is evaluated:
+---     This is required for the collection of constraints
 ---   * a trace of symbolic information for case branches and
 ---   * a counter of the remaining number of evaluation steps
 data CEState = CEState
-  { cesCCTOpts :: CCTOpts
-  , cesHeap    :: Heap
-  , cesFuncs   :: [AFuncDecl TypeExpr]
-  , cesFresh   :: VarIndex
-  , cesTrace   :: Trace
-  , cesSteps   :: Int
+  { cesCCTOpts   :: CCTOpts
+  , cesHeap      :: Heap
+  , cesFuncs     :: [AFuncDecl TypeAnn]
+  , cesFresh     :: VarIndex
+  , cesTraceFlag :: Bool
+  , cesTrace     :: Trace
+  , cesSteps     :: Int
   }
 
 --- Initial state for concolic evaluation
-initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeExpr] -> VarIndex
+initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeAnn] -> VarIndex
             -> CEState
 initCEState opts sub fs v = CEState
-  { cesCCTOpts = opts
-  , cesHeap    = fromSubst opts sub
-  , cesFuncs   = fs
-  , cesFresh   = v
-  , cesTrace   = []
-  , cesSteps   = 0
+  { cesCCTOpts   = opts
+  , cesHeap      = fromSubst opts sub
+  , cesFuncs     = fs
+  , cesFresh     = v
+  , cesTraceFlag = False
+  , cesTrace     = []
+  , cesSteps     = 0
   }
 
 --- Generate a Heap from a given Substitution
@@ -71,17 +76,18 @@ fromSubst opts sub = fromListH $ zip (dom sub) $ case optStrategy opts of
   Narrowing -> repeat FreeVar
 
 --- Trace a single evaluation step
-traceStep :: AExpr TypeExpr -> CEM a -> CEM a
-traceStep e x = do
+traceStep :: String -> AExpr TypeAnn -> CEM a -> CEM a
+traceStep ruleName e x = do
   opts <- getOpts
   h    <- getHeap
   t    <- getTrace
   s    <- countStep
   traceEval opts
     (pPrint $ vsep [ text "Evaluation step:" <+> int s
-                   , text "Heap:"           <+> ppHeap h
-                   , text "Symbolic Trace:" <+> listSpaced (map pretty t)
-                   , text "Expression:"     <+> ppExp e
+                   , text "Rule Name:"       <+> text ruleName
+                   , text "Heap:"            <+> ppHeap h
+                   , text "Symbolic Trace:"  <+> listSpaced (map pretty t)
+                   , text "Expression:"      <+> ppExp e
                    ])
     (if optEvalSteps opts - s + 1 == 0
        then error "Maximum number of evaluation steps exceeded"
@@ -150,11 +156,11 @@ bindBH :: VarIndex -> CEM ()
 bindBH v = modifyHeap (bindHole v)
 
 --- Bind a variable to an expression
-bindE :: VarIndex -> AExpr TypeExpr -> CEM ()
+bindE :: VarIndex -> AExpr TypeAnn -> CEM ()
 bindE v e = modifyHeap (bindExpr v e)
 
 --- Bind a variable lazily to an expression
-bindLE :: VarIndex -> AExpr TypeExpr -> CEM ()
+bindLE :: VarIndex -> AExpr TypeAnn -> CEM ()
 bindLE v e = modifyHeap (bindLazyExpr v e)
 
 --- Bind a variable as "free"
@@ -169,7 +175,7 @@ bindLF v = modifyHeap (bindLazyFree v)
 --- For let expressions and declarations of free variables the corresponding
 --- bindings are directly performed in the heap and thus preventing
 --- nested let expressions in the heap.
-bindArg :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+bindArg :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 bindArg e = case e of
   AVar      _ _ -> return e
   ALet  _ bs e' -> addBindings bs e' >>= bindArg
@@ -181,7 +187,7 @@ bindArg e = case e of
 --- ----------------------------------------------------------------------------
 
 --- Lookup the parameters and the rhs for a given function
-lookupRule :: QName -> CEM (Maybe ([VarIndex], AExpr TypeExpr))
+lookupRule :: QName -> CEM (Maybe ([VarIndex], AExpr TypeAnn))
 lookupRule f = do
   mf <- gets (find (hasName f) . cesFuncs)
   return $ case mf of
@@ -204,16 +210,34 @@ freshVars n = sequence $ replicate n freshVar
 
 --- ----------------------------------------------------------------------------
 
+--- Set the trace flag to the given boolean
+setTraceFlag :: Bool -> CEM ()
+setTraceFlag b = modify $ \s -> s { cesTraceFlag = b }
+
+--- Perform the given action with tracing of constraints on literals
+withLitTracing :: CEM a -> CEM a
+withLitTracing act = do
+  setTraceFlag True
+  res <- act
+  setTraceFlag False
+  return res
+
+--- ----------------------------------------------------------------------------
+
 --- Get the trace of symbolic information
 getTrace :: CEM Trace
 getTrace = gets cesTrace
 
 --- Add a decision with symbolic information for case expression `cid` to the trace
-mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeExpr)
-           -> AExpr TypeExpr -> [VarIndex] -> CEM ()
-mkDecision cid bnr v (qn, ty) e args
-  = let (v', sobj) = maybe (v, SymCons qn ty) id  (getLConstr qn e)
-    in modify $ \s -> s { cesTrace = (Decision cid bnr v' sobj args) : cesTrace s }
+mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeAnn)
+           -> AExpr TypeAnn -> [VarIndex] -> CEM ()
+mkDecision cid bnr v c e args
+  | isDict qn = return ()
+  | otherwise =
+      let (v', sobj) = maybe (v, SymCons qn ty) id (getLConstr qn (fmap fst3 e))
+      in modify $ \s -> s { cesTrace = (Decision cid bnr v' sobj args) : cesTrace s }
+ where
+  (qn, ty) = mapSnd fst3 c
 
 --- ----------------------------------------------------------------------------
 
@@ -227,11 +251,11 @@ countStep = do
 --- ----------------------------------------------------------------------------
 
 --- concolic evaluation
-ceval :: AExpr TypeExpr -> CEState -> ([AExpr TypeExpr], [Trace], VarIndex)
+ceval :: AExpr TypeAnn -> CEState -> ([AExpr TypeAnn], [Trace], VarIndex)
 ceval e s = fromResult $ runCEM (nf e) s
 
 --- Prepare expression for narrowing
-prepExpr :: AExpr TypeExpr -> VarIndex -> (AExpr TypeExpr, [VarIndex])
+prepExpr :: AExpr TypeAnn -> VarIndex -> (AExpr TypeAnn, [VarIndex])
 prepExpr e v = case e of
   AComb ty FuncCall f es ->
     let n  = length es - 1
@@ -244,7 +268,7 @@ prepExpr e v = case e of
  toVar e' vi = if isFuncPartCall e' then e' else AVar (annExpr e') vi
 
 --- Normalize FlatCurry function call
-norm :: VarIndex -> AExpr TypeExpr -> (AExpSubst, AExpr TypeExpr, VarIndex)
+norm :: VarIndex -> AExpr TypeAnn -> (AExpSubst, AExpr TypeAnn, VarIndex)
 norm v e = case e of
   AComb ty FuncCall f es ->
     let vs = [v, v-1 ..]
@@ -254,33 +278,33 @@ norm v e = case e of
 
 --- Select the result, the symbolic trace and the next free index
 --- from the search tree of non-deterministic results
-fromResult :: Result (AExpr TypeExpr, CEState)
-           -> ([AExpr TypeExpr], [Trace], VarIndex)
+fromResult :: Result (AExpr TypeAnn, CEState)
+           -> ([AExpr TypeAnn], [Trace], VarIndex)
 fromResult (Return (e,s)) = traceSym s ([e], [reverse (cesTrace s)], cesFresh s)
 fromResult (Choice e1 e2) = let (r1, t1, v1) = fromResult e1
                                 (r2, t2, v2) = fromResult e2
                             in (r1 ++ r2, t1 ++ t2, min v1 v2)
 
 --- Evaluate given FlatCurry expression to normal form
-nf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+nf :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 nf e = hnf e >>= \e' -> case e' of
   AComb ty ConsCall c es -> AComb ty ConsCall c <$> mapM nf es
   _                      -> return e'
 
 --- Evaluate given FlatCurry expression to head normal form
-hnf :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
-hnf exp = traceStep exp $ case exp of
-  AVar        ty v -> hnfVar  ty v
-  ALit        ty l -> hnfLit  ty l
-  AComb ty ct f es -> hnfComb ty ct f es
-  ALet      _ bs e -> hnfLet  bs e
-  AFree     _ vs e -> hnfFree vs e
-  AOr      _ e1 e2 -> hnfOr   e1 e2
-  ACase  _ ct e bs -> hnfCase ct e bs
+hnf :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
+hnf exp = case exp of
+  AVar        ty v -> traceStep "Var" exp $ hnfVar  ty v
+  ALit        ty l -> traceStep "Lit" exp $ hnfLit  ty l
+  AComb ty ct f es -> traceStep "Comb" exp $ hnfComb ty ct f es
+  ALet      _ bs e -> traceStep "Let" exp $ hnfLet  bs e
+  AFree     _ vs e -> traceStep "Free" exp $ hnfFree vs e
+  AOr      _ e1 e2 -> traceStep "Or" exp $ hnfOr   e1 e2
+  ACase ann ct e bs -> traceStep "Case" exp $ hnfCase ann ct e bs
   ATyped     _ e _ -> hnf     e
 
 --- Concolic evaluation of a variable
-hnfVar :: TypeExpr -> VarIndex -> CEM (AExpr TypeExpr)
+hnfVar :: TypeAnn -> VarIndex -> CEM (AExpr TypeAnn)
 hnfVar ty i = lookupBinding i >>= \mbdg -> case mbdg of
   Nothing            -> failS ty
   Just BlackHole     -> failS ty
@@ -308,36 +332,39 @@ hnfVar ty i = lookupBinding i >>= \mbdg -> case mbdg of
     _                        -> error $ "Eval.bindAndCheckLazy: " ++ show v
 
 --- Concolic evaluation of a literal
-hnfLit :: TypeExpr -> Literal -> CEM (AExpr TypeExpr)
+hnfLit :: TypeAnn -> Literal -> CEM (AExpr TypeAnn)
 hnfLit ty l = return (ALit ty l)
 
 --- Concolic evaluation of a combination:
 ---   * flattened function calls: check if function is builtin or user-defined
 ---                               and start corresponding concolic evaluation
 ---   * non-flattened function/constructor calls: flatten them
-hnfComb :: TypeExpr -> CombType -> (QName, TypeExpr) -> [AExpr TypeExpr]
-        -> CEM (AExpr TypeExpr)
-hnfComb ty ct f es = case ct of
+hnfComb :: TypeAnn -> CombType -> (QName, TypeAnn) -> [AExpr TypeAnn]
+        -> CEM (AExpr TypeAnn)
+hnfComb ty ct f@(qn, _) es = case ct of
   FuncCall
-    | all isVar es -> lookupRule (fst f) >>= \mrule -> case mrule of
+    | all isVar es -> lookupRule qn >>= \mrule -> case mrule of
       Nothing      -> ceBuiltin ty f es
       Just (xs, e) -> hnf (subst (mkSubst xs es) e)
     | otherwise    -> mvs >>= \vs -> hnf (AComb ty ct f vs)
   _                -> AComb ty ct f <$> mvs
  where
   mvs = mapM bindArg es
+  mkCmpCall t o args =
+    let n = 2 - length args
+    in AComb t (if n == 0 then FuncCall else FuncPartCall n) o args
 
 --- Concolic evaluation of a let expression
-hnfLet :: [((VarIndex, TypeExpr), AExpr TypeExpr)] -> AExpr TypeExpr
-       -> CEM (AExpr TypeExpr)
+hnfLet :: [((VarIndex, TypeAnn), AExpr TypeAnn)] -> AExpr TypeAnn
+       -> CEM (AExpr TypeAnn)
 hnfLet bs e = case bs of
   [((i, _), e')]               -- let binding with case id: do not introduce a fresh variable!
     | i < 0 -> bindE i e'       >>  hnf e
   _         -> addBindings bs e >>= hnf
 
 --- Add a list of local bindings to the heap
-addBindings :: [((VarIndex, TypeExpr), AExpr TypeExpr)] -> AExpr TypeExpr
-            -> CEM (AExpr TypeExpr)
+addBindings :: [((VarIndex, TypeAnn), AExpr TypeAnn)] -> AExpr TypeAnn
+            -> CEM (AExpr TypeAnn)
 addBindings bs e = do
   ys <- freshVars (length bs)
   let (txs, es) = unzip bs
@@ -347,11 +374,11 @@ addBindings bs e = do
   return (subst sigma e)
 
 --- Concolic evaluation of a declaration of free variables
-hnfFree :: [(VarIndex, TypeExpr)] -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+hnfFree :: [(VarIndex, TypeAnn)] -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 hnfFree vs e = addFrees vs e >>= hnf
 
 --- Add a list of free variables to the heap
-addFrees :: [(VarIndex, TypeExpr)] -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+addFrees :: [(VarIndex, TypeAnn)] -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 addFrees tvs e = do
   ys <- freshVars (length tvs)
   mapM_ bindF ys
@@ -359,22 +386,25 @@ addFrees tvs e = do
   return $ subst (mkSubst vs (zipWith AVar tys ys)) e
 
 --- Concolic evaluation of a non-deterministic choice
-hnfOr :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+hnfOr :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 hnfOr e1 e2 = hnf e1 <|> hnf e2
 
 --- Concolic evaluation of a case expression
-hnfCase :: CaseType -> AExpr TypeExpr -> [ABranchExpr TypeExpr] -> CEM (AExpr TypeExpr)
-hnfCase ct e bs = do
-  (cid, e')      <- rmvCaseID e
-  ve@(AVar _ vi) <- bindArg e' -- flattening of scrutinized expression
-  hnf ve >>= \v -> case v of
+hnfCase :: TypeAnn -> CaseType -> AExpr TypeAnn -> [ABranchExpr TypeAnn]
+        -> CEM (AExpr TypeAnn)
+hnfCase ann ct e bs = do
+--   (cid, e')      <- rmvCaseID e
+  ve@(AVar _ vi) <- bindArg e -- flattening of scrutinized expression
+  -- Evaluate case argument with or without tracing of constraints on literals
+  let hnfCaseArg = if hasBoolType e then (withLitTracing . hnf) else hnf
+  hnfCaseArg ve >>= \v -> case v of
     ALit ty l -> case findBranch (ALPattern ty l) bs of
       Nothing          -> failS ty
       Just (_, _,  be) -> hnf be
     AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        mkDecision cid (BNr n bcnt) vi c e' (map varNr es)
+        mkDecision cid (BNr n bcnt) vi c e (map varNr es)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -390,45 +420,46 @@ hnfCase ct e bs = do
           hnf be
         guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
-          mkDecision cid (BNr n bcnt) vi c e' ys
+          mkDecision cid (BNr n bcnt) vi c e ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
           hnf (subst (mkSubst xs es') be)
     _ -> error $ "Eval.hnfCase: " ++ show v
  where
+  cid  = cidAnn ann
   bcnt = length bs
 
 --- Remove the case identifier from the scrutinized expression of a case expression
-rmvCaseID :: AExpr TypeExpr -> CEM (VarIndex, AExpr TypeExpr)
-rmvCaseID e = case e of
-  AVar _ cid -> lookupBinding cid >>= \mbdg -> case mbdg of
-               Just (BoundVar be) -> return (cid, be)
-               _                  -> error $
-                 "Eval.rmvCaseID: Unexpected binding " ++ show mbdg
-  _          -> error $ "Eval.rmvCaseID: Expected case id but found " ++ show e
+-- rmvCaseID :: AExpr TypeAnn -> CEM (VarIndex, AExpr TypeAnn)
+-- rmvCaseID e = case e of
+--   AVar _ cid -> lookupBinding cid >>= \mbdg -> case mbdg of
+--                Just (BoundVar be) -> return (cid, be)
+--                _                  -> error $
+--                  "Eval.rmvCaseID: Unexpected binding " ++ show mbdg
+--   _          -> error $ "Eval.rmvCaseID: Expected case id but found " ++ show e
 
 --- Failing evaluation
-failS :: TypeExpr -> CEM (AExpr TypeExpr)
-failS ty = return (failedExpr ty)
+failS :: TypeAnn -> CEM (AExpr TypeAnn)
+failS ann = return (failedExpr ann)
 
 --- Evaluation to `True`
-succeedS :: CEM (AExpr TypeExpr)
+succeedS :: CEM (AExpr TypeAnn)
 succeedS = return trueExpr
 
 --- Evaluation which yields a free variable
-unknownS :: TypeExpr -> CEM (AExpr TypeExpr)
-unknownS ty = do
+unknownS :: TypeAnn -> CEM (AExpr TypeAnn)
+unknownS ann = do
   v <- freshVar
   bindF v
-  return (AVar ty v)
+  return (AVar ann v)
 
 -- -----------------------------------------------------------------------------
 -- Concolic evaluation of builtin functions
 -- -----------------------------------------------------------------------------
 
-ceBuiltin :: TypeExpr -> (QName, TypeExpr) -> [AExpr TypeExpr]
-          -> CEM (AExpr TypeExpr)
+ceBuiltin :: TypeAnn -> (QName, TypeAnn) -> [AExpr TypeAnn]
+          -> CEM (AExpr TypeAnn)
 ceBuiltin ty f@(qn, _) es = case snd qn of
   "apply"            -> binary ceBuiltinApply             es
   "cond"             -> binary ceBuiltinCond              es
@@ -440,8 +471,8 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "?"                -> binary ceBuiltinChoice            es
   "&"                -> binary ceBuiltinAmp               es
   "&>"               -> binary ceBuiltinCond              es
-  "&&"               -> binary ceBuiltinAnd               es
-  "||"               -> binary ceBuiltinOr                es
+--   "&&"               -> binary ceBuiltinAnd               es
+--   "||"               -> binary ceBuiltinOr                es
   "$!"               -> binary (ceBuiltinDollarBangs hnf) es
   "$!!"              -> binary (ceBuiltinDollarBangs  nf) es
   "$##"              -> binary ceBuiltinDollarHashHash    es
@@ -461,6 +492,12 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   -- comparison on integers
   "prim_eqInt"       -> binary (ceBuiltinIntOp      (==)) es
   "prim_ltEqInt"     -> binary (ceBuiltinIntOp      (<=)) es
+--   "_==" -> binary (ceBuiltinIntOp (==)) es
+--   "_/=" -> binary (ceBuiltinIntOp (/=)) es
+--   "_<"  -> binary (ceBuiltinIntOp (<)) es
+--   "_<=" -> binary (ceBuiltinIntOp (<=)) es
+--   "_>"  -> binary (ceBuiltinIntOp (>)) es
+--   "_>=" -> binary (ceBuiltinIntOp (>=)) es
 
   -- conversion from and to characters
   "prim_ord"         -> unary ceBuiltinOrd                es
@@ -482,41 +519,41 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "prim_ltEqFloat"   -> binary (ceBuiltinFloatOp    (<=)) es
   _                  -> error $ "ceBuiltin: Unknown built in function " ++ show f
 
-unary :: (AExpr TypeExpr -> CEM (AExpr TypeExpr)) -> [AExpr TypeExpr]
-      -> CEM (AExpr TypeExpr)
+unary :: (AExpr TypeAnn -> CEM (AExpr TypeAnn)) -> [AExpr TypeAnn]
+      -> CEM (AExpr TypeAnn)
 unary f es = case es of
   [e] -> f e
   _   -> error "Eval unary"
 
-binary :: (AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr))
-       -> [AExpr TypeExpr] -> CEM (AExpr TypeExpr)
+binary :: (AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn))
+       -> [AExpr TypeAnn] -> CEM (AExpr TypeAnn)
 binary f es = case es of
   [e1,e2] -> f e1 e2
   _       -> error "Eval.binary"
 
 --- Concolic evaluation of a higher order application
-ceBuiltinApply :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinApply :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinApply e1 e2 = hnf e1 >>= \v1 -> case v1 of
   AComb ty ct f es | isPartCall ct -> hnf $ addPartCallArg ty ct f es e2
   _                                -> ceBuiltinApply v1 e2
 
 --- Concolic evaluation of a conditional expression `(&>)` / `cond`
-ceBuiltinCond :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinCond :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinCond e1 e2 = hnf e1 >>= \v1 -> case v1 of
   AComb _ FuncCall g [x ,y]
       -- replace `(e1 &> e2) &> e3` by `e1 &> (e2 &> e3)`
     | fst g == prel "&>"   -> hnf $ builtin cty1 "&>"   [x, builtin cty2 "&>" [y, e2]]
     | fst g == prel "cond" -> hnf $ builtin cty1 "cond" [x, builtin cty2 "cond" [y, e2]]
   _ | v1 == trueExpr       -> hnf e2
-    | v1 == failedExpr ty  -> failS ty
+    | v1 == failedExpr ann -> failS ann
     | otherwise            -> ceBuiltinCond v1 e2
  where
-  cty1 = condType boolType
-  cty2 = condType (annExpr e2)
-  ty   = annExpr e2
+  cty1 = condAnn boolType
+  cty2 = condAnn (tyAnn ann)
+  ann  = annExpr e2
 
 --- Concolic evaluation of `ensureNotFree`
-ceBuiltinEnsureNotFree :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinEnsureNotFree :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinEnsureNotFree e = do
   v1 <- hnf e
   case v1 of
@@ -524,13 +561,13 @@ ceBuiltinEnsureNotFree e = do
     _        -> return v1
 
 --- Concolic evaluation of `failed`
-ceBuiltinFailed :: TypeExpr -> [AExpr TypeExpr] -> CEM (AExpr TypeExpr)
+ceBuiltinFailed :: TypeAnn -> [AExpr TypeAnn] -> CEM (AExpr TypeAnn)
 ceBuiltinFailed ty es = case es of
   [] -> failS ty
   _  -> error "Eval.ceBuiltinFailed"
 
 --- Concolic evaluation of `error`
-ceBuiltinError :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinError :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinError e = do
   v1 <- nf e
   case v1 of
@@ -538,39 +575,39 @@ ceBuiltinError e = do
     _                    -> ceBuiltinError v1
 
 --- Concolic evaluation of `success`
-ceBuiltinSuccess :: [AExpr TypeExpr] -> CEM (AExpr TypeExpr)
+ceBuiltinSuccess :: [AExpr TypeAnn] -> CEM (AExpr TypeAnn)
 ceBuiltinSuccess es = case es of
   [] -> succeedS
   _  -> error "Eval.ceBuiltinSuccess"
 
 --- Concolic evaluation of `unknown`
-ceBuiltinUnknown :: TypeExpr -> [AExpr TypeExpr] -> CEM (AExpr TypeExpr)
+ceBuiltinUnknown :: TypeAnn -> [AExpr TypeAnn] -> CEM (AExpr TypeAnn)
 ceBuiltinUnknown ty es = case es of
   [] -> unknownS ty
   _  -> error "Eval.ceBuiltinUnknown"
 
 --- Concolic evaluation of `(?)`
-ceBuiltinChoice :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinChoice :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinChoice = hnfOr
 
 --- Concolic evaluation of a concurrent conjunction `(&)`
-ceBuiltinAmp :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinAmp :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinAmp e1 e2 = hnf e1 >>= \v1 -> case v1 of
   AVar _ i -> lookupBinding i >>= \mbdg -> case mbdg of
-    Just FreeVar                -> bindE i trueExpr >> hnf e2
-    Just LazyFree               -> bindE i trueExpr >> hnf e2
-    _                           -> other v1
-  _ | v1 == trueExpr            -> hnf e2
-    | v1 == failedExpr boolType -> failS boolType
-    | otherwise                 -> other v1
+    Just FreeVar               -> bindE i trueExpr >> hnf e2
+    Just LazyFree              -> bindE i trueExpr >> hnf e2
+    _                          -> other v1
+  _ | v1 == trueExpr           -> hnf e2
+    | v1 == failedExpr boolAnn -> failS boolAnn
+    | otherwise                -> other v1
  where
-  other v1 = hnf e2 >>= \v2 -> let ty2 = annExpr v2 in case v2 of
-    _ | v2 == trueExpr       -> hnf v1
-      | v2 == failedExpr ty2 -> failS ty2
-      | otherwise            -> ceBuiltinAmp v1 v2
+  other v1 = hnf e2 >>= \v2 -> case v2 of
+    _ | v2 == trueExpr           -> hnf v1
+      | v2 == failedExpr boolAnn -> failS boolAnn
+      | otherwise                -> ceBuiltinAmp v1 v2
 
 --- Concolic evaluation of `negateFloat`
-ceBuiltinNegFloat :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinNegFloat :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinNegFloat e = do
   v <- hnf e
   case v of
@@ -578,19 +615,19 @@ ceBuiltinNegFloat e = do
     _                 -> ceBuiltinNegFloat v
 
 --- Concolic evaluation of `ord`
-ceBuiltinOrd :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinOrd :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinOrd e = hnf e >>= \v -> case v of
   ALit _ (Charc l) -> return (toFCY (ord l))
   _                -> ceBuiltinOrd v
 
 --- Concolic evaluation of `chr`
-ceBuiltinChr :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinChr :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinChr e = hnf e >>= \v -> case v of
   ALit _ (Intc l) -> return (toFCY (chr l))
   _               -> ceBuiltinChr v
 
 --- Concolic evaluation of `i2f`
-ceBuiltinI2F :: AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinI2F :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinI2F e = do
   v <- hnf e
   case v of
@@ -598,27 +635,27 @@ ceBuiltinI2F e = do
     _               -> ceBuiltinI2F v
 
 --- Concolic evaluation of `(&&)`
-ceBuiltinAnd :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
-ceBuiltinAnd e1 e2 = hnf $ ACase boolType Flex e1
-  [ ABranch (APattern boolType (prel "False", boolType) []) falseExpr
-  , ABranch (APattern boolType (prel "True",  boolType) []) e2
-  ]
+-- ceBuiltinAnd :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
+-- ceBuiltinAnd e1 e2 = hnf $ ACase boolType Flex e1
+--   [ ABranch (APattern boolType (prel "False", boolType) []) falseExpr
+--   , ABranch (APattern boolType (prel "True",  boolType) []) e2
+--   ]
 
 --- Concolic evaluation of `(||)`
-ceBuiltinOr :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
-ceBuiltinOr e1 e2 = hnf $ ACase boolType Flex e1
-  [ ABranch (APattern boolType (prel "True",  boolType) []) trueExpr
-  , ABranch (APattern boolType (prel "False", boolType) []) e2
-  ]
+-- ceBuiltinOr :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
+-- ceBuiltinOr e1 e2 = hnf $ ACase boolType Flex e1
+--   [ ABranch (APattern boolType (prel "True",  boolType) []) trueExpr
+--   , ABranch (APattern boolType (prel "False", boolType) []) e2
+--   ]
 
 --- Concolic evaluation of `($!)` / `($!!)`
-ceBuiltinDollarBangs :: (AExpr TypeExpr -> CEM (AExpr TypeExpr))
-                     -> AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinDollarBangs :: (AExpr TypeAnn -> CEM (AExpr TypeAnn))
+                     -> AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinDollarBangs f e1 e2 = f e2 >>= ceBuiltinApply e1
 
 --- Concolic evaluation of `($##)`
-ceBuiltinDollarHashHash :: AExpr TypeExpr -> AExpr TypeExpr
-                        -> CEM (AExpr TypeExpr)
+ceBuiltinDollarHashHash :: AExpr TypeAnn -> AExpr TypeAnn
+                        -> CEM (AExpr TypeAnn)
 ceBuiltinDollarHashHash e1 e2 = do
   v2 <- nf e2
   case v2 of
@@ -626,7 +663,7 @@ ceBuiltinDollarHashHash e1 e2 = do
     _        -> ceBuiltinApply e1 v2
 
 --- Concolic evaluation of `(=:=)`
-ceBuiltinUni :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinUni :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinUni e1 e2 = do
   v1 <- hnf e1
   v2 <- hnf e2
@@ -658,9 +695,9 @@ ceBuiltinUni e1 e2 = do
       _             -> ceBuiltinUni v2 v1
     (ALit _ l1, ALit _ l2)
       | l1 == l2   -> succeedS
-      | otherwise  -> failS boolType
+      | otherwise  -> failS boolAnn
     (AVar _ i, e@(AComb ty ConsCall c es))
-      | occurCheck i e h -> failS boolType
+      | occurCheck i e h -> failS boolAnn
       | otherwise        -> do
           js <- freshVars (length es)
           mapM_ bindF js
@@ -668,7 +705,7 @@ ceBuiltinUni e1 e2 = do
           bindE i (AComb ty ConsCall c ys)
           hnf $ combine (prel "&") (prel "=:=") trueExpr ys es
     (e@(AComb ty ConsCall c es), AVar _ j)
-      | occurCheck j e h -> failS boolType
+      | occurCheck j e h -> failS boolAnn
       | otherwise        -> do
           is <- freshVars (length es)
           mapM_ bindF is
@@ -677,25 +714,25 @@ ceBuiltinUni e1 e2 = do
           hnf $ combine (prel "&") (prel "=:=") trueExpr es ys
     (AComb _ ConsCall c1 es1, AComb _ ConsCall c2 es2)
       | c1 == c2  -> hnf $ combine (prel "&") (prel "=:=") trueExpr es1 es2
-      | otherwise -> failS boolType
+      | otherwise -> failS boolAnn
     _ | all (== trueExpr) [v1, v2] -> succeedS
       | otherwise                  -> ceBuiltinUni v1 v2
 
 --- Concolic evaluation of `(=:<=)`
-ceBuiltinLazyUni :: AExpr TypeExpr -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinLazyUni :: AExpr TypeAnn -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinLazyUni e1 e2 = do
   v1 <- hnf e1
   case v1 of
     AVar ty i -> lookupBinding i >>= \mbdg -> case mbdg of
       Just FreeVar  -> bindLE i e2 >> succeedS
-      Just LazyFree -> bindF i >> hnf (AComb boolType FuncCall (prel "=:=", unifyType ty) [v1, e2])
+      Just LazyFree -> bindF i >> hnf (AComb boolAnn FuncCall (prel "=:=", unifyAnn ty) [v1, e2])
       _             -> ceBuiltinLazyUni v1 e2
     _     -> do
       v2 <- hnf e2
       case (v1, v2) of
         (ALit _ l1, ALit _ l2)
           | l1 == l2   -> succeedS
-          | otherwise  -> failS boolType
+          | otherwise  -> failS boolAnn
         (ALit _ _, AVar _ j) -> lookupBinding j >>= \mbdg -> case mbdg of
           Just FreeVar -> bindE j v1 >> succeedS
           _            -> ceBuiltinLazyUni v1 v2
@@ -712,11 +749,11 @@ ceBuiltinLazyUni e1 e2 = do
             hnf $ combine (prel "&") (prel "=:<=") trueExpr es ys
         (AComb _ ConsCall c1 es1, AComb _ ConsCall c2 es2)
           | c1 == c2  -> hnf $ combine (prel "&") (prel "=:<=") trueExpr es1 es2
-          | otherwise -> failS boolType
+          | otherwise -> failS boolAnn
         _             -> ceBuiltinUni v1 v2
 
 --- Occur check for strict unification
-occurCheck :: VarIndex -> AExpr TypeExpr -> Heap -> Bool
+occurCheck :: VarIndex -> AExpr TypeAnn -> Heap -> Bool
 occurCheck i e h = i `elem` freeVars e h
   where
   freeVars (AVar        _ j) h' = case lookupH j h' of
@@ -737,8 +774,8 @@ occurCheck i e h = i `elem` freeVars e h
 --- Concolic evaluation of binary operations on integers (arithmetic, logical)
 -- Note that PAKCS applies most binary operators in reverse order.
 -- For this reason, the arguments of `ceBuiltinIntOp` are switched internally.
-ceBuiltinIntOp :: ToFCY a => (Int -> Int -> a) -> AExpr TypeExpr
-               -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinIntOp :: ToFCY a => (Int -> Int -> a) -> AExpr TypeAnn
+               -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinIntOp op e1 e2 = do
   v1 <- hnf e1
   v2 <- hnf e2
@@ -747,8 +784,8 @@ ceBuiltinIntOp op e1 e2 = do
     _                                    -> ceBuiltinIntOp op v1 v2
 
 --- Concolic evaluation of binary operations on characters (arithmetic, logical)
-ceBuiltinCharOp :: ToFCY a => (Char -> Char -> a) -> AExpr TypeExpr
-                -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinCharOp :: ToFCY a => (Char -> Char -> a) -> AExpr TypeAnn
+                -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinCharOp op e1 e2 = do
   v1 <- hnf e1
   v2 <- hnf e2
@@ -759,8 +796,8 @@ ceBuiltinCharOp op e1 e2 = do
 --- Concolic evaluation of binary operations on floats (arithmetic, logical)
 -- Note that PAKCS applies most binary operators in reverse order.
 -- For this reason, the arguments of `ceBuiltinFloatOp` are switched internally.
-ceBuiltinFloatOp :: ToFCY a => (Float -> Float -> a) -> AExpr TypeExpr
-                 -> AExpr TypeExpr -> CEM (AExpr TypeExpr)
+ceBuiltinFloatOp :: ToFCY a => (Float -> Float -> a) -> AExpr TypeAnn
+                 -> AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinFloatOp op e1 e2 = do
   v1 <- hnf e1
   v2 <- hnf e2
@@ -769,5 +806,5 @@ ceBuiltinFloatOp op e1 e2 = do
     _                                        -> ceBuiltinFloatOp op v1 v2
 
 --- FlatCurry representation of a call to a builtin function
-builtin :: TypeExpr -> String -> [AExpr TypeExpr] -> AExpr TypeExpr
-builtin ty f es = AComb (resultType ty) FuncCall (prel f, ty) es
+builtin :: TypeAnn -> String -> [AExpr TypeAnn] -> AExpr TypeAnn
+builtin ann f es = AComb (trTpl3 resultType id id ann) FuncCall (prel f, ann) es

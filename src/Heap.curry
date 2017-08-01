@@ -3,13 +3,14 @@
 --- to markers for free variables or black holes, or the expressions.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version June 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module Heap where
 
 import FiniteMap
 import FlatCurry.Annotated.Types
 
+import FlatCurryGoodies (TypeAnn)
 import PrettyPrint
 import Substitution
 
@@ -20,8 +21,8 @@ import Substitution
 --- @cons FreeVar     - the variable is a logic (free) variable
 --- @cons LazyFree    - the variable is a lazily bound logic (free) variable
 data Binding = BlackHole
-             | BoundVar  (AExpr TypeExpr)
-             | LazyBound (AExpr TypeExpr)
+             | BoundVar  (AExpr TypeAnn)
+             | LazyBound (AExpr TypeAnn)
              | FreeVar
              | LazyFree
  deriving Show
@@ -58,11 +59,11 @@ bindHole :: VarIndex -> Heap -> Heap
 bindHole v = bindH v BlackHole
 
 --- Bind a variable to the given expression in the given heap
-bindExpr :: VarIndex -> AExpr TypeExpr -> Heap -> Heap
+bindExpr :: VarIndex -> AExpr TypeAnn -> Heap -> Heap
 bindExpr v e = bindH v (BoundVar e)
 
 --- Bind a variable lazily to the given expression in the given heap
-bindLazyExpr :: VarIndex -> AExpr TypeExpr -> Heap -> Heap
+bindLazyExpr :: VarIndex -> AExpr TypeAnn -> Heap -> Heap
 bindLazyExpr v e = bindH v (LazyBound e)
 
 --- Bind a variable as "free" in the given heap
