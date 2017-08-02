@@ -24,7 +24,8 @@ import           SMTLib.Goodies
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
 import           Substitution
-import           Utils               ((<$>), foldM, mapM)
+import           Symbolic            (SymObj (..), prelSymCons)
+import           Utils               ((<$>), foldM, mapFst, mapM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa
@@ -299,7 +300,7 @@ typeVars = [c : if n == 0 then [] else show n |  n <- [0 ..], c <- ['a' .. 'z']]
 
 --- predefined basic types and type constructors
 predefTypes :: BM QName SMT.Ident
-predefTypes = listToBM (<) (<) $ map qualPrel
+predefTypes = listToBM (<) (<) $ map (mapFst prel)
   [ ("Bool","Bool"), ("Int","Int"), ("Float","Float")
   , ("()","Unit"), ("[]","List"), ("(,)","Tuple2"), ("(,,)","Tuple3")
   , ("(,,,)","Tuple4"), ("(,,,,)","Tuple5"), ("(,,,,,)","Tuple6")
@@ -317,21 +318,7 @@ predefCons = listToBM (<) (<) $
   , (prelSymCons "[]" (listType (TVar 0)),"nil")
   , (prelSymCons ":" (mkFunType [TVar 0, listType (TVar 0)] (listType (TVar 0))),"insert")
   , (prelSymCons "()" unitType,"unit")
-  , (mkTplType "(,)"               2,"tuple2")
-  , (mkTplType "(,,)"              3,"tuple3")
-  , (mkTplType "(,,,)"             4,"tuple4")
-  , (mkTplType "(,,,,)"            5,"tuple5")
-  , (mkTplType "(,,,,,)"           6,"tuple6")
-  , (mkTplType "(,,,,,,)"          7,"tuple7")
-  , (mkTplType "(,,,,,,,)"         8,"tuple8")
-  , (mkTplType "(,,,,,,,,)"        9,"tuple9")
-  , (mkTplType "(,,,,,,,,,)"      10,"tuple10")
-  , (mkTplType "(,,,,,,,,,,)"     11,"tuple11")
-  , (mkTplType "(,,,,,,,,,,,)"    12,"tuple12")
-  , (mkTplType "(,,,,,,,,,,,,)"   13,"tuple13")
-  , (mkTplType "(,,,,,,,,,,,,,)"  14,"tuple14")
-  , (mkTplType "(,,,,,,,,,,,,,,)" 15,"tuple15")
-  ]
+  ] ++ map genTpl [2..15]
 
 --- data types which are ignored regarding the generation of SMT data type declarations
 ignoredTypes :: [String]
@@ -344,3 +331,15 @@ tvarDecl = SMT.DeclareDatatypes [] "TVar" [SMT.Cons "tvar" []]
 --- Sort to represent functional types in SMTLib
 funDecl :: SMT.Command
 funDecl = SMT.DeclareDatatypes [] "Fun" [SMT.Cons "fun" []]
+
+-- helper
+
+-- Generate mapping of symbolic FlatCurry constructor to SMT-LIB constructor for tuples
+genTpl :: Int -> (SymObj, SMT.Ident)
+genTpl n = (mkTplType ('(' : replicate (n-1) ',' ++ ")") n, "tuple" ++ show n)
+
+-- Smart constructor for symbolic tuples
+mkTplType :: String -> Int -> SymObj
+mkTplType n a | a >= 2 = SymCons qn (mkFunType tvars (TCons qn tvars))
+  where qn    = prel n
+        tvars = map TVar [0 .. a-1]

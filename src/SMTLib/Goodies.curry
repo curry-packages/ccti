@@ -2,14 +2,14 @@
 --- This module provides some goodies and utility functions for SMTLib.
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Goodies where
 
 import FlatCurry.Types  (VarIndex, Literal (..))
 
-import FlatCurryGoodies (LConstr (..))
 import SMTLib.Types
+import Symbolic     (LConstr (..))
 
 --- Transform a FlatCurry variable index into an SMTLib symbol
 var2SMT :: VarIndex -> Symbol

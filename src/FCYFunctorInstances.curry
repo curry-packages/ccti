@@ -2,11 +2,13 @@
 --- This module provides Functor instances for annotated FlatCurry
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version August 2017
 --- ----------------------------------------------------------------------------
 module FCYFunctorInstances where
 
 import FlatCurry.Annotated.Types
+
+import Utils                     (mapSnd)
 
 instance Functor AProg where
   fmap f (AProg m imps ts fs os) = AProg m imps ts (map (fmap f) fs) os
@@ -35,9 +37,3 @@ instance Functor ABranchExpr where
 instance Functor APattern where
   fmap f (APattern  ann aqn ps) = APattern (f ann) (mapSnd f aqn) (map (mapSnd f) ps)
   fmap f (ALPattern ann      l) = ALPattern (f ann) l
-
--- helper
-
--- Apply given function to second component of a tuple
-mapSnd :: (a -> b) -> (c, a) -> (c, b)
-mapSnd f (x, y) = (x, f y)

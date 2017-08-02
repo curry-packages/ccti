@@ -62,6 +62,18 @@ zip3 xs ys zs = case xs of
                       []   -> []
                       c:cs -> (a, b, c) : zip3 as bs cs
 
+-- -----------------------------------------------------------------------------
+-- Tuple utilities
+-- -----------------------------------------------------------------------------
+
+-- Apply given function to first component of a tuple
+mapFst :: (a -> b) -> (a, c) -> (b, c)
+mapFst f (x, y) = (f x, y)
+
+-- Apply given function to second component of a tuple
+mapSnd :: (a -> b) -> (c, a) -> (c, b)
+mapSnd f (x, y) = (x, f y)
+
 fst3 :: (a, b, c) -> a
 fst3 (x, _, _) = x
 

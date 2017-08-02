@@ -1,24 +1,148 @@
+--- ----------------------------------------------------------------------------
+--- This module provides data structures for tracing symbolic information.
+---
+--- @author  Jan Tikovsky
+--- @version August 2017
+--- ----------------------------------------------------------------------------
 module Symbolic where
 
-import FlatCurry.Annotated.Types (QName)
-import FlatCurry.Types           (TypeExpr, VarIndex)
+import FlatCurry.Annotated.Types --(Literal, QName, TypeExpr, VarIndex)
 import List                      (nub)
 
-import FlatCurryGoodies          (SymObj)
+import FlatCurryGoodies          (boolType, charType, floatType, intType, isBoolType, prel)
 import PrettyPrint
 import SMTLib.Pretty
-import SMTLib.Types              (Command, Term)
+import SMTLib.Types              (Term)
+import Utils                     (mapFst)
 
-data BranchNr = BNr Int Int
-  deriving Show
+--- ----------------------------------------------------------------------------
+--- Symbolic objects
+--- ----------------------------------------------------------------------------
 
---- Trace of visited case expressions (along with selected branch decision)
+--- Symbolic object
+---   * symbolic FlatCurry constructor
+---   * constraint on symbolic literal
+data SymObj = SymCons QName TypeExpr
+            | SymLit LConstr Literal
+ deriving Show
+
+--- Create a symbolic constructor for a typed FlatCurry 'Prelude' constructor
+prelSymCons :: String -> TypeExpr -> SymObj
+prelSymCons c ty = SymCons (prel c) ty
+
+--- Get the type of a symbolic object
+soType :: SymObj -> TypeExpr
+soType (SymCons _ ty) = ty
+soType (SymLit   _ l) = case l of
+  Intc   _ -> intType
+  Floatc _ -> floatType
+  Charc  _ -> charType
+
+--- Literal constraint
+data LConstr = E | NE | L | LE | G | GE
+ deriving (Eq, Ord, Show)
+
+--- Negate a literal constraint
+lcNeg :: LConstr -> LConstr
+lcNeg E  = NE
+lcNeg NE = E
+lcNeg L  = GE
+lcNeg LE = G
+lcNeg G  = LE
+lcNeg GE = L
+
+--- Mirror literal constraint due to swapping of argument order
+lcMirror :: LConstr -> LConstr
+lcMirror lc = case lc of
+  L  -> G
+  G  -> L
+  LE -> GE
+  GE -> LE
+  _  -> lc
+
+instance Pretty SymObj where
+  pretty (SymCons qn ty) = ppQName qn <+> doubleColon <+> ppTypeExp ty
+  pretty (SymLit  lcs l) = pretty lcs <+> ppLiteral l
+
+instance Pretty LConstr where
+  pretty E  = text "=="
+  pretty NE = text "/="
+  pretty L  = text "<"
+  pretty LE = text "<="
+  pretty G  = text ">"
+  pretty GE = text ">="
+
+--- Consider only the qualified name when comparing two typed FlatCurry
+--- constructors
+instance Eq SymObj where
+  o1 == o2 = case (o1, o2) of
+    (SymCons qn1 _ , SymCons qn2   _) -> qn1  == qn2
+    (SymLit lcs1 l1, SymLit  lcs2 l2) -> lcs1 == lcs2 && l1  == l2
+    _                                 -> False
+
+--- Consider only the qualified name when comparing two typed FlatCurry
+--- constructors
+instance Ord SymObj where
+  compare c1 c2 = case (c1, c2) of
+    (SymCons qn1 _, SymCons qn2 _) -> compare qn1 qn2
+    (SymLit   _ l1, SymLit   _ l2) -> compare l1  l2
+
+--- Generate a literal constraint from the given FlatCurry expression,
+--- if possible
+getLConstr :: QName -> AExpr TypeExpr -> Maybe (VarIndex, SymObj)
+getLConstr qn e = case (rmvApplies e) of
+  AComb ty _ (fn, _) es
+    | isBoolType ty -> do
+      lc <- fmap (if snd qn == "False" then lcNeg else id) (lookup fn litConstrs)
+      case es of
+        [ALit _ l, AVar _ v] -> return (v, SymLit (lcMirror lc) l)
+        [AVar _ v, ALit _ l] -> return (v, SymLit lc l)
+        _                    -> Nothing
+  _                          -> Nothing
+
+rmvApplies :: AExpr TypeExpr -> AExpr TypeExpr
+rmvApplies = rmvApplies' []
+  where
+  rmvApplies' args e = case e of
+    AComb _ ct qn es
+      | isApplyCall e  -> case es of
+                            [f,arg] -> rmvApplies' (arg:args) f
+                            _       -> error "IdentifyCases.rmvApplies"
+      | not (null args) -> AComb boolType ct qn args
+    _                   -> e
+
+isApplyCall :: AExpr a -> Bool
+isApplyCall e = case e of
+  AComb _ FuncCall qn _ -> snd (fst qn) == "apply"
+  _                     -> False
+
+--- List of supported literal constraints
+litConstrs :: [(QName, LConstr)]
+litConstrs = map (mapFst prel)
+  [("_==" , E), ("_/=" , NE), ("_<" , L), ("_<=", LE), ("_>" , G ), ("_>=", GE)]
+
+--- ----------------------------------------------------------------------------
+--- Symbolic tracing of case branches
+--- ----------------------------------------------------------------------------
+
+--- Symbolic trace
 type Trace = [Decision]
 
+--- Symbolic information for branch decisions
+---   * identifier of case expression
+---   * number of selected branch
+---   * associated symbolic variable
+---   * symbolic object (i.e. chosen constructor or literal constraint)
+---   * possible symbolic variables for arguments
+data Decision = Decision CaseID BranchNr VarIndex SymObj [VarIndex]
+ deriving Show
+
+--- Case identifier
 type CaseID = VarIndex
 
-data Decision = Decision CaseID BranchNr VarIndex SymObj [VarIndex]
-  deriving Show
+--- Branch number, i.e. branch m of n branches
+data BranchNr = BNr Int Int
+ deriving Show
 
 --- Pretty printing
 instance Pretty BranchNr where
@@ -31,11 +155,30 @@ instance Pretty Decision where
                     , list (map ppVarIndex args)
                     ]
 
+--- Pretty printing of a symbolic trace
 ppTrace :: Trace -> Doc
 ppTrace = listSpaced . map pretty
 
---- depth of a symbolic node in a symbolic execution tree
-type Depth = Int
+--- Get all symbolic variables of a decision
+getSVars :: Decision -> [VarIndex]
+getSVars (Decision _ _ sv _ args) = sv : args
+
+--- Rename all variables occuring in a symbolic trace
+rnmTrace :: [VarIndex] -> Trace -> ([Trace],VarIndex) -> ([Trace],VarIndex)
+rnmTrace sargs ds (ts, v) =
+  let svars = filter (`notElem` sargs) $ nub $ concatMap getSVars ds
+      sub   = zip svars [v, v-1 ..]
+  in (map (appSub sub) ds : ts, v - length svars)
+  where
+  appSub sub' (Decision cid bnr sv scon args) =
+    let repl x = case lookup x sub' of
+                   Nothing -> x
+                   Just  y -> y
+    in Decision cid bnr (repl sv) scon (map repl args)
+
+--- ----------------------------------------------------------------------------
+--- Nodes of symbolic execution tree
+--- ----------------------------------------------------------------------------
 
 --- A symbolic node includes the following information:
 ---   * the depth of the node in the execution tree,
@@ -54,19 +197,5 @@ data SymNode = SymNode
   }
  deriving (Eq, Show)
 
---- Get all symbolic variables of a decision
-getSVars :: Decision -> [VarIndex]
-getSVars (Decision _ _ sv _ args) = sv : args
-
---- Rename all variables occuring in a trace
-rnmTrace :: [VarIndex] -> Trace -> ([Trace],VarIndex) -> ([Trace],VarIndex)
-rnmTrace sargs ds (ts, v) =
-  let svars = filter (`notElem` sargs) $ nub $ concatMap getSVars ds
-      sub   = zip svars [v, v-1 ..]
-  in (map (appSub sub) ds : ts, v - length svars)
-  where
-  appSub sub' (Decision cid bnr sv scon args) =
-    let repl x = case lookup x sub' of
-                   Nothing -> x
-                   Just  y -> y
-    in Decision cid bnr (repl sv) scon (map repl args)
+--- Node depth in a symbolic execution tree
+type Depth = Int

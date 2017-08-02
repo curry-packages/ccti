@@ -11,7 +11,7 @@ import FCY2SMTLib
 import Eval                      ( CEState (..), ceval, fromSubst, initCEState
                                  , norm )
 import FCYFunctorInstances
-import FlatCurryGoodies          (TypeAnn, SymObj (..), resArgTypes, tyOf)
+import FlatCurryGoodies          (TypeAnn, resArgTypes)
 import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
@@ -23,8 +23,7 @@ import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
                                  , Sort, Term )
 import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
                                  , subst)
-import Symbolic                  ( BranchNr (..), CaseID, Decision (..), Depth
-                                 , SymNode (..), Trace, ppTrace, rnmTrace )
+import Symbolic
 import Utils                     (fst3, mapM, mapM_, unlessM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
@@ -183,7 +182,7 @@ processTrace trace tree uvNodes smtInfo
         -- extended symbolic tree
         st'     = addNode (SymNode d cid cidcs' cs vs v) st
         -- updated type environment
-        smtEnv' = execSMTTrans (updTypeEnv (v:args) (tyOf sobj) args) smtEnv
+        smtEnv' = execSMTTrans (updTypeEnv (v:args) (soType sobj) args) smtEnv
         -- generate constraint information
         ci      = genCsInfo smtEnv' sobj v args
         -- extended list of path constraints

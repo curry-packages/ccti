@@ -350,9 +350,6 @@ hnfComb ty ct f@(qn, _) es = case ct of
   _                -> AComb ty ct f <$> mvs
  where
   mvs = mapM bindArg es
-  mkCmpCall t o args =
-    let n = 2 - length args
-    in AComb t (if n == 0 then FuncCall else FuncPartCall n) o args
 
 --- Concolic evaluation of a let expression
 hnfLet :: [((VarIndex, TypeAnn), AExpr TypeAnn)] -> AExpr TypeAnn
@@ -429,15 +426,6 @@ hnfCase ann ct e bs = do
  where
   cid  = cidAnn ann
   bcnt = length bs
-
---- Remove the case identifier from the scrutinized expression of a case expression
--- rmvCaseID :: AExpr TypeAnn -> CEM (VarIndex, AExpr TypeAnn)
--- rmvCaseID e = case e of
---   AVar _ cid -> lookupBinding cid >>= \mbdg -> case mbdg of
---                Just (BoundVar be) -> return (cid, be)
---                _                  -> error $
---                  "Eval.rmvCaseID: Unexpected binding " ++ show mbdg
---   _          -> error $ "Eval.rmvCaseID: Expected case id but found " ++ show e
 
 --- Failing evaluation
 failS :: TypeAnn -> CEM (AExpr TypeAnn)
