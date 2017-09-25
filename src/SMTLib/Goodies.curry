@@ -55,9 +55,9 @@ forAll vs ss t = case vs of
 
 --- smart constructors for SMT sorts
 
---- smart constructor for a sort representing type variables
-tyVar :: Sort
-tyVar = SComb "TVar" []
+--- smart constructor for a sort representing Curry's 'Ordering' type
+tyOrdering :: Sort
+tyOrdering = SComb "Ordering" []
 
 --- smart constructor for a sort representing a functional type
 tyFun :: Sort

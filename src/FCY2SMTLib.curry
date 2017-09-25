@@ -285,7 +285,7 @@ fromSpecConst (SMT.Str _) = error "FCY2SMTLib.fromSpecConst: strings not support
 --- Transform a FlatCurry type expression into an SMTLib sort
 toSort :: SMTInfo -> TypeExpr -> SMT.Sort
 toSort _       (ForallType _ _) = error "FCY2SMT.toSort"
-toSort _       (TVar         _) = tyVar
+toSort _       (TVar         _) = tyOrdering
 toSort _       (FuncType   _ _) = tyFun
 toSort smtInfo (TCons   qn tys) = case lookupType qn smtInfo of
   Nothing -> error $ "Eval.toSort: No SMTLIB representation for type constructor "
