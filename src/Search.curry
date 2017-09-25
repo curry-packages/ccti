@@ -12,7 +12,6 @@ import Eval                      ( CEState (..), ceval, fromSubst, initCEState
                                  , norm )
 import FCYFunctorInstances
 import FlatCurryGoodies          (TypeAnn, resArgTypes)
-import Heap                      (toSubst)
 import Output
 import PrettyPrint hiding        (compose)
 import Search.DFS

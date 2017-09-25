@@ -20,12 +20,14 @@ import Substitution
 --- @cons LazyBound e - the variable is bound to an expression `e` lazily
 --- @cons FreeVar     - the variable is a logic (free) variable
 --- @cons LazyFree    - the variable is a lazily bound logic (free) variable
+--- @cons SymArg      - the variable is a symbolic argument
 data Binding = BlackHole
              | BoundVar  (AExpr TypeAnn)
              | LazyBound (AExpr TypeAnn)
              | FreeVar
              | LazyFree
- deriving Show
+             | SymArg
+ deriving (Eq, Show)
 
 --- A `Heap` is an association from a `VarIndex` to a `Binding`
 type Heap = FM VarIndex Binding
@@ -74,18 +76,13 @@ bindFree v = bindH v FreeVar
 bindLazyFree :: VarIndex -> Heap -> Heap
 bindLazyFree v = bindH v LazyFree
 
+--- Bind a variable as symbolic argument
+bindSym :: VarIndex -> Heap -> Heap
+bindSym v = bindH v SymArg
+
 --- Unbind a variable in the given heap
 unbind :: VarIndex -> Heap -> Heap
 unbind = flip delFromFM
-
--- TODO: reconsider!
---- Transform a heap to a substitution
-toSubst :: Heap -> AExpSubst
-toSubst = foldFM updEntry (emptyFM (<))
-  where updEntry k v fm = case v of
-          BoundVar e  -> addToFM fm k e
-          LazyBound e -> addToFM fm k e
-          _           -> fm
 
 --- Pretty printing
 
@@ -95,6 +92,7 @@ instance Pretty Binding where
   pretty (LazyBound e) = text "~" <> ppExp e
   pretty FreeVar       = text "free"
   pretty LazyFree      = text "~free"
+  pretty SymArg        = text "sym"
 
 ppHeap :: Heap -> Doc
 ppHeap h = ppHeap' $ fmToList h

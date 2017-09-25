@@ -119,7 +119,7 @@ isApplyCall e = case e of
 --- List of supported literal constraints
 litConstrs :: [(QName, LConstr)]
 litConstrs = map (mapFst prel)
-  [("_==" , E), ("_/=" , NE), ("_<" , L), ("_<=", LE), ("_>" , G ), ("_>=", GE)]
+  [("prim_eqInt", E), ("prim_ltEqInt", LE)]
 
 --- ----------------------------------------------------------------------------
 --- Symbolic tracing of case branches

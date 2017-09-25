@@ -7,6 +7,9 @@
 --- ----------------------------------------------------------------------------
 module Eval where
 
+-- TODO: remove
+import FiniteMap (filterFM, maxFM)
+
 import FlatCurry.Annotated.Goodies hiding (range)
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
@@ -20,6 +23,8 @@ import PrettyPrint hiding          (combine)
 import Substitution
 import Symbolic
 import Utils
+
+import Debug
 
 infixl 3 <|>
 
@@ -54,11 +59,12 @@ data CEState = CEState
   , cesTraceFlag :: Bool
   , cesTrace     :: Trace
   , cesSteps     :: Int
+  , cesSymHeap   :: Heap
+  , cesLConstr   :: Maybe (AExpr TypeAnn)
   }
 
 --- Initial state for concolic evaluation
-initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeAnn] -> VarIndex
-            -> CEState
+initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeAnn] -> VarIndex -> CEState
 initCEState opts sub fs v = CEState
   { cesCCTOpts   = opts
   , cesHeap      = fromSubst opts sub
@@ -67,6 +73,8 @@ initCEState opts sub fs v = CEState
   , cesTraceFlag = False
   , cesTrace     = []
   , cesSteps     = 0
+  , cesSymHeap   = foldr bindSym emptyH (dom sub)
+  , cesLConstr   = Nothing
   }
 
 --- Generate a Heap from a given Substitution
@@ -210,6 +218,9 @@ freshVars n = sequence $ replicate n freshVar
 
 --- ----------------------------------------------------------------------------
 
+getTraceFlag :: CEM Bool
+getTraceFlag = gets cesTraceFlag
+
 --- Set the trace flag to the given boolean
 setTraceFlag :: Bool -> CEM ()
 setTraceFlag b = modify $ \s -> s { cesTraceFlag = b }
@@ -229,13 +240,14 @@ getTrace :: CEM Trace
 getTrace = gets cesTrace
 
 --- Add a decision with symbolic information for case expression `cid` to the trace
-mkDecision :: CaseID -> BranchNr -> VarIndex -> (QName, TypeAnn)
-           -> AExpr TypeAnn -> [VarIndex] -> CEM ()
-mkDecision cid bnr v c e args
-  | isDict qn = return ()
-  | otherwise =
-      let (v', sobj) = maybe (v, SymCons qn ty) id (getLConstr qn (fmap fst3 e))
-      in modify $ \s -> s { cesTrace = (Decision cid bnr v' sobj args) : cesTrace s }
+mkDecision :: AExpr TypeAnn -> CaseID -> BranchNr -> VarIndex
+           -> (QName, TypeAnn) -> [VarIndex] -> CEM ()
+mkDecision e cid bnr v c args
+  | isOtherwise e || isDict qn = return ()
+  | otherwise = do
+      mce <- getResetLConstr >>= getSymConstr qn
+      let (v', sobj) = maybe (v, SymCons qn ty) id mce
+      modify $ \s -> s { cesTrace = (Decision cid bnr v' sobj args) : cesTrace s }
  where
   (qn, ty) = mapSnd fst3 c
 
@@ -247,6 +259,49 @@ countStep = do
   let n = cesSteps s + 1
   put s { cesSteps = n }
   return n
+
+--- ----------------------------------------------------------------------------
+
+-- TODO: Use symbolic heap instead of Maybe (LConstr, [AExpr TypeExpr])
+-- Overthink/refactor/remove this part of the implementation
+
+setLConstr :: Maybe (AExpr TypeAnn) -> CEM ()
+setLConstr mce = modify $ \s -> s { cesLConstr = mce }
+
+getResetLConstr :: CEM (Maybe (AExpr TypeAnn))
+getResetLConstr = do
+  mce <- gets cesLConstr
+  setLConstr Nothing
+  return mce
+
+traceConstr :: (AExpr TypeAnn) -> CEM ()
+traceConstr ce = getTraceFlag >>= \b -> whenM b (setLConstr (Just ce))
+
+getSymConstr :: QName -> Maybe (AExpr TypeAnn) -> CEM (Maybe (VarIndex, SymObj))
+getSymConstr _  Nothing  = return Nothing
+getSymConstr qn (Just e) = case e of
+  AComb _ FuncCall (fqn, _) [AVar _ i, AVar _ j] -> do
+    let mlc = fmap (if snd qn == "False" then lcNeg else id) (lookup fqn litConstrs)
+    mkSymConstr mlc i j
+  _                                             -> return Nothing
+ where
+  mkSymConstr mlc i j = do
+    mbi <- getOrigVI i
+    mbj <- getOrigVI j
+    return $ case (mlc, mbi, mbj) of
+      (Just lc, Just (i', BoundVar (ALit a1 l1)), Just (j', BoundVar (ALit a2 l2)))
+        | trd3 a1 && not (trd3 a2) -> Just (j', SymLit lc            l1)
+        | trd3 a2 && not (trd3 a1) -> Just (i', SymLit (lcMirror lc) l2) -- due to application of binary operators in reverse order
+      _                            -> Nothing
+
+-- very ugly => replace by symbolic heap implementation
+getOrigVI :: VarIndex -> CEM (Maybe (VarIndex, Binding))
+getOrigVI i = do
+  mbi <- lookupBinding i
+  h   <- getHeap
+  case mbi of
+    Nothing -> return Nothing
+    Just b  -> return (maxFM (filterFM (\_ b' -> b == b') h))
 
 --- ----------------------------------------------------------------------------
 
@@ -354,10 +409,7 @@ hnfComb ty ct f@(qn, _) es = case ct of
 --- Concolic evaluation of a let expression
 hnfLet :: [((VarIndex, TypeAnn), AExpr TypeAnn)] -> AExpr TypeAnn
        -> CEM (AExpr TypeAnn)
-hnfLet bs e = case bs of
-  [((i, _), e')]               -- let binding with case id: do not introduce a fresh variable!
-    | i < 0 -> bindE i e'       >>  hnf e
-  _         -> addBindings bs e >>= hnf
+hnfLet bs e = addBindings bs e >>= hnf
 
 --- Add a list of local bindings to the heap
 addBindings :: [((VarIndex, TypeAnn), AExpr TypeAnn)] -> AExpr TypeAnn
@@ -401,7 +453,7 @@ hnfCase ann ct e bs = do
     AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
       Just (n, vs, be) -> do
-        mkDecision cid (BNr n bcnt) vi c e (map varNr es)
+        mkDecision e cid (BNr n bcnt) vi c (map varNr es)
         hnf (subst (mkSubst vs es) be)
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
@@ -417,7 +469,7 @@ hnfCase ann ct e bs = do
           hnf be
         guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
-          mkDecision cid (BNr n bcnt) vi c e ys
+          mkDecision e cid (BNr n bcnt) vi c ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
@@ -478,8 +530,8 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "prim_i2f"         -> unary  ceBuiltinI2F               es
 
   -- comparison on integers
-  "prim_eqInt"       -> binary (ceBuiltinIntOp      (==)) es
-  "prim_ltEqInt"     -> binary (ceBuiltinIntOp      (<=)) es
+  "prim_eqInt"       -> traceConstr ce >> binary (ceBuiltinIntOp (==)) es
+  "prim_ltEqInt"     -> traceConstr ce >> binary (ceBuiltinIntOp (<=)) es
 --   "_==" -> binary (ceBuiltinIntOp (==)) es
 --   "_/=" -> binary (ceBuiltinIntOp (/=)) es
 --   "_<"  -> binary (ceBuiltinIntOp (<)) es
@@ -506,6 +558,8 @@ ceBuiltin ty f@(qn, _) es = case snd qn of
   "prim_eqFloat"     -> binary (ceBuiltinFloatOp    (==)) es
   "prim_ltEqFloat"   -> binary (ceBuiltinFloatOp    (<=)) es
   _                  -> error $ "ceBuiltin: Unknown built in function " ++ show f
+ where
+  ce = AComb ty FuncCall f es
 
 unary :: (AExpr TypeAnn -> CEM (AExpr TypeAnn)) -> [AExpr TypeAnn]
       -> CEM (AExpr TypeAnn)

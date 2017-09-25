@@ -174,6 +174,12 @@ tpl tys = AComb ann ConsCall ((prel "(,)"), ann)
 isBoolType :: TypeExpr -> Bool
 isBoolType ty = ty == boolType
 
+--- Check if the given FlatCurry expression is `otherwise`
+isOtherwise :: AExpr a -> Bool
+isOtherwise e = case e of
+  AComb _ FuncCall (("Prelude", "otherwise"), _) [] -> True
+  _                                                 -> False
+
 hasBoolType :: AExpr TypeAnn -> Bool
 hasBoolType e = tyAnn (annExpr e) == boolType
 
