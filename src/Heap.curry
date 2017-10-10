@@ -3,15 +3,16 @@
 --- to markers for free variables or black holes, or the expressions.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module Heap where
 
 import FiniteMap
+import FlatCurry.Annotated.Pretty (ppExp, ppVarIndex)
 import FlatCurry.Annotated.Types
+import Text.Pretty
 
 import FlatCurryGoodies (TypeAnn)
-import PrettyPrint
 import Substitution
 
 --- A 'Binding' represents the value of a variable bound in the heap.

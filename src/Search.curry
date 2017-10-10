@@ -1,29 +1,30 @@
 module Search where
 
-import FiniteMap                 ( FM, addListToFM, addToFM_C, delFromFM, elemFM
-                                 , emptyFM, foldFM, lookupFM )
+import FiniteMap                   ( FM, addListToFM, addToFM_C, delFromFM
+                                   , elemFM, emptyFM, foldFM, lookupFM )
 import FlatCurry.Annotated.Goodies (argTypes)
+import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
-import List                      (delete, intersect, union)
+import List                        (delete, intersect, union)
+import Text.Pretty hiding          (compose)
 
-import CCTOptions                (CCTOpts (..))
+import CCTOptions                  (CCTOpts (..))
 import FCY2SMTLib
-import Eval                      ( CEState (..), ceval, fromSubst, initCEState
-                                 , norm )
+import Eval                        ( CEState (..), ceval, fromSubst, initCEState
+                                   , norm )
 import FCYFunctorInstances
-import FlatCurryGoodies          (TypeAnn, resArgTypes)
+import FlatCurryGoodies            (TypeAnn, resArgTypes)
 import Output
-import PrettyPrint hiding        (compose)
 import Search.DFS
 import SMTLib.Goodies
-import SMTLib.Pretty             (showSMT)
+import SMTLib.Pretty               (showSMT)
 import SMTLib.Solver
-import SMTLib.Types              ( Command (..), QIdent, Sort (..), SMTLib (..)
-                                 , Sort, Term )
-import Substitution              ( AExpSubst, compose, dom, mkSubst, restrict
-                                 , subst)
+import SMTLib.Types                ( Command (..), QIdent, Sort (..), SMTLib (..)
+                                   , Sort, Term )
+import Substitution                ( AExpSubst, compose, dom, mkSubst, restrict
+                                   , subst)
 import Symbolic
-import Utils                     (fst3, mapM, mapM_, unlessM, whenM)
+import Utils                       (fst3, mapM, mapM_, unlessM, ppFM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type UVNodes = FM CaseID CaseInfo
@@ -50,6 +51,10 @@ instance Show ConstrInfo where
 --- Test case data: function call with arguments and corresponding
 --- non-deterministic results
 type TestCase = (AExpr TypeExpr, [AExpr TypeExpr])
+
+--- Pretty printing of test cases
+ppTestCase :: (AExpr TypeExpr, [AExpr TypeExpr]) -> Doc
+ppTestCase (e, res) = parens (ppExp e <+> equals <+> set (map ppExp res))
 
 data CSState = CSState
   { cssCCTOpts :: CCTOpts
@@ -195,6 +200,14 @@ genCsInfo :: SMTInfo -> SymObj -> VarIndex -> [VarIndex] -> ConstrInfo
 genCsInfo smtInfo sobj v args = case sobj of
   SymCons  _ _ -> KnownCons [(cons2SMT smtInfo sobj v, map (flip getSMTSort smtInfo) args)]
   SymLit lcs l -> LitConstr (\x -> (lcs2SMT lcs) x (lit2SMT l))
+
+lcs2SMT :: LConstr -> Term -> Term -> Term
+lcs2SMT E  = (=%)
+lcs2SMT NE = (/=%)
+lcs2SMT L  = (<%)
+lcs2SMT LE = (<=%)
+lcs2SMT G  = (>%)
+lcs2SMT GE = (>=%)
 
 --- Generate a path constraint
 genPConstr :: ConstrInfo -> VarIndex -> [VarIndex] -> Term

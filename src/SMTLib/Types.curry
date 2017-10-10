@@ -1,13 +1,17 @@
 --- ----------------------------------------------------------------------------
 --- This module provides an abstract representation of the SMT-LIB language.
---- The implementation is based on the SMT-LIB Standard 2.5
---- (http://smtlib.cs.uiowa.edu/papers/smt-lib-reference-v2.5-r2015-06-28.pdf)
+--- The implementation is based on the SMT-LIB Standard 2.6
+--- (http://smtlib.cs.uiowa.edu/papers/smt-lib-reference-v2.6-r2017-07-18.pdf)
 --- and covers most parts of the language description.
 ---
 --- @author  Jan Tikovsky
---- @version April 2017
+--- @version September 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Types where
+
+--- Representation of an SMT-LIB script
+data SMTLib = SMTLib [Command]
+  deriving (Eq, Show)
 
 type Symbol  = String
 type Ident   = String
@@ -16,12 +20,9 @@ type Numeral = Int
 data Keyword = KW Symbol
   deriving (Eq, Show)
 
-data SMTLib = SMTLib [Command]
-  deriving (Eq, Show)
-
 --- S-expressions
 
--- hexadecimal, binary missing
+-- binary and hexadecimal representation not supported
 data SpecConstant = Num Numeral
                   | Dec Float
                   | Str String
@@ -51,6 +52,8 @@ data Attribute = AKW  Keyword
 
 --- Terms
 
+-- note: definitions of 'var_binding' and 'match_case' are inlined
+
 data QIdent = Id Ident
             | As Ident Sort
   deriving (Eq, Show)
@@ -58,12 +61,16 @@ data QIdent = Id Ident
 data SortedVar = SV Symbol Sort
   deriving (Eq, Show)
 
+data Pattern = PComb Symbol [Symbol]
+  deriving (Eq, Show)
+
 data Term = TConst SpecConstant
-          | TComb QIdent [Term]
-          | Let [(Symbol, Term)] Term
+          | TComb  QIdent [Term]
+          | Let    [(Symbol, Term)] Term
           | Forall [SortedVar] Term
           | Exists [SortedVar] Term
-          | Annot Term [Attribute]
+          | Match  Term [(Pattern, Term)]
+          | Annot  Term [Attribute]
   deriving (Eq, Show)
 
 --- Theories
@@ -76,22 +83,22 @@ data MetaSpecConstant = NUMERAL
                       | STRING
   deriving (Eq, Show)
 
-data FunSymDecl = Spec SpecConstant Sort [Attribute]
-                | Meta MetaSpecConstant Sort [Attribute]
+data FunSymDecl = Spec  SpecConstant Sort [Attribute]
+                | Meta  MetaSpecConstant Sort [Attribute]
                 | Ident Ident [Sort] [Attribute]
   deriving (Eq, Show)
 
 data ParFunSymDecl = ParFunSymDecl FunSymDecl [Symbol] Ident [Sort] [Attribute]
   deriving (Eq, Show)
 
-data TheoryAttr = Sorts [SortSymDecl]
-                | Funs [ParFunSymDecl]
-                | SortsDesc String
-                | FunsDesc String
-                | Definition String
-                | Values String
-                | Notes String
-                | TAttr Attribute
+data TheoryAttr = TASorts      [SortSymDecl]
+                | TAFuns       [ParFunSymDecl]
+                | TASortsDesc  String
+                | TAFunsDesc   String
+                | TADefinition String
+                | TAValues     String
+                | TANotes      String
+                | TA           Attribute
   deriving (Eq, Show)
 
 data Theory = Theory Symbol [TheoryAttr]
@@ -130,6 +137,8 @@ data Option = DiagnosticOutput     String
 
 --- Commands
 
+-- Note: instead of a 'selector_dec' definition the definition of 'sorted_var' is reused
+
 data FunDec = FunDec Symbol [SortedVar] Sort
   deriving (Eq, Show)
 
@@ -140,38 +149,48 @@ data PropLit = Sym Symbol
              | Not Symbol
   deriving (Eq, Show)
 
-data ConsDecl = Cons Ident [SortedVar]
+--- sort declaration for datatypes
+data SortDecl = SortDecl Symbol Numeral
   deriving (Eq, Show)
 
-data Command = Assert Term
+--- datatype declaration
+data DTDecl = MT [ConsDecl]          -- monomorphic type
+            | PT [Symbol] [ConsDecl] -- polymorphic type
+  deriving (Eq, Show)
+
+data ConsDecl = Cons Symbol [SortedVar]
+  deriving (Eq, Show)
+
+data Command = Assert              Term
              | CheckSat
-             | CheckSatAssuming [PropLit]
-             | DeclareConst Symbol Sort
-             | DeclareDatatypes [Ident] Symbol [ConsDecl] -- currently not part of the SMTLIB standard
-             | DeclareFun Symbol [Sort] Sort
-             | DeclareSort Symbol Numeral
-             | DefineFun FunDef
-             | DefineFunRec FunDef
-             | DefineFunsRec [(FunDec, Term)]
-             | DefineSort Symbol [Symbol] Sort
-             | Echo String
+             | CheckSatAssuming    [PropLit]
+             | DeclareConst        Symbol Sort
+             | DeclareDatatype     Symbol DTDecl
+             | DeclareDatatypes    [(SortDecl, DTDecl)]
+             | DeclareFun          Symbol [Sort] Sort
+             | DeclareSort         Symbol Numeral
+             | DefineFun           FunDef
+             | DefineFunRec        FunDef
+             | DefineFunsRec       [(FunDec, Term)]
+             | DefineSort          Symbol [Symbol] Sort
+             | Echo                String
              | Exit
              | GetAssertions
              | GetAssignment
-             | GetInfo InfoFlag
+             | GetInfo             InfoFlag
              | GetModel
-             | GetOption Option
+             | GetOption           Option
              | GetProof
              | GetUnsatAssumptions
              | GetUnsatCore
-             | GetValue [Term]
-             | Pop  Numeral
-             | Push Numeral
+             | GetValue            [Term]
+             | Pop                 Numeral
+             | Push                Numeral
              | Reset
              | ResetAssertions
-             | SetInfo Attribute
-             | SetLogic Logic
-             | SetOption Option
+             | SetInfo             Attribute
+             | SetLogic            Logic
+             | SetOption           Option
   deriving (Eq, Show)
 
 --- Logics provided by the SMT-LIB Standard
@@ -221,6 +240,29 @@ data Logic = ALL
 
 --- Command responses
 
+data ErrorBehavior = ImmediateExit
+                   | ContinuedExecution
+  deriving (Eq, Show)
+
+data ReasonUnknown = Memout
+                   | Incomplete
+                   | SEReason SExpr
+  deriving (Eq, Show)
+
+data ModelRsp = MRFun     FunDef
+              | MRFunRec  FunDef
+              | MRFunsRec [(FunDec, Term)]
+  deriving (Eq, Show)
+
+data InfoRsp = AssertionStackLevelsRsp Numeral
+             | AuthorsRsp              String
+             | ErrorBehaviorRsp        ErrorBehavior
+             | NameRsp                 String
+             | ReasonUnknownRsp        ReasonUnknown
+             | VersionRsp              String
+             | AttrRsp                 Attribute
+  deriving (Eq, Show)
+
 type ValuationPair  = (Term, Term)
 type TValuationPair = (Symbol, Bool)
 
@@ -243,28 +285,5 @@ data CmdResponse = SuccessRsp
 data CheckSat = Sat
               | Unsat
               | Unknown
-  deriving (Eq, Show)
-
-data InfoRsp = AssertionStackLevelsRsp Numeral
-             | AuthorsRsp              String
-             | ErrorBehaviorRsp        ErrorBehavior
-             | NameRsp                 String
-             | ReasonUnknownRsp        ReasonUnknown
-             | VersionRsp              String
-             | AttrRsp                 Attribute
-  deriving (Eq, Show)
-
-data ErrorBehavior = ImmediateExit
-                   | ContinuedExecution
-  deriving (Eq, Show)
-
-data ReasonUnknown = Memout
-                   | Incomplete
-                   | SEReason SExpr
-  deriving (Eq, Show)
-
-data ModelRsp = MRFun     FunDef
-              | MRFunRec  FunDef
-              | MRFunsRec [(FunDec, Term)]
   deriving (Eq, Show)
 

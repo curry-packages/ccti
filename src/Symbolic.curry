@@ -2,18 +2,18 @@
 --- This module provides data structures for tracing symbolic information.
 ---
 --- @author  Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module Symbolic where
 
-import FlatCurry.Annotated.Types --(Literal, QName, TypeExpr, VarIndex)
-import List                      (nub)
+import FlatCurry.Annotated.Pretty (ppLiteral, ppQName, ppTypeExp, ppVarIndex)
+import FlatCurry.Annotated.Types
+import List                       (nub)
+import Text.Pretty
 
-import FlatCurryGoodies          (boolType, charType, floatType, intType, isBoolType, prel)
-import PrettyPrint
-import SMTLib.Pretty
-import SMTLib.Types              (Term)
-import Utils                     (mapFst)
+import FlatCurryGoodies           (boolType, charType, floatType, intType, isBoolType, prel)
+import SMTLib.Types               (Term)
+import Utils                      (mapFst)
 
 --- ----------------------------------------------------------------------------
 --- Symbolic objects

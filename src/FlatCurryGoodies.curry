@@ -2,7 +2,7 @@
 --- This module provides some additional goodies for annotated FlatCurry.
 ---
 --- @author  Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module FlatCurryGoodies where
 
@@ -11,7 +11,6 @@ import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
 import List                        (find, isPrefixOf)
 
-import PrettyPrint
 import Utils
 
 --- ----------------------------------------------------------------------------
@@ -347,7 +346,3 @@ instance (ToFCY a, ToFCY b) => ToFCY (a, b) where
   fromFCY e = case e of
     AComb _ ConsCall (("Prelude", "(,)"), _) [e1, e2] -> (fromFCY e1, fromFCY e2)
     _                                                 -> error $ "fromFCY: no tuple: " ++ show e
-
---- Pretty print a FlatCurry expression
-printExpr :: AExpr TypeExpr -> IO ()
-printExpr = putStrLn . pPrint . ppExp

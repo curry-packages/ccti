@@ -6,26 +6,27 @@
 --- versa.
 ---
 --- @author  Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
 import Char                          (toLower)
 import FiniteMap
-import FlatCurry.Annotated.Types
 import FlatCurry.Annotated.Goodies   (argTypes, resultType)
+import FlatCurry.Annotated.Pretty    (ppQName, ppTypeExp, ppVarIndex)
+import FlatCurry.Annotated.Types
 import List                          (isPrefixOf)
+import Text.Pretty hiding (compose)
 
 import           Bimap
 import           FCYFunctorInstances
 import           FlatCurryGoodies
-import           PrettyPrint hiding  (compose)
 import           SMTLib.Goodies
 import           SMTLib.Pretty
 import qualified SMTLib.Types as SMT
 import           Substitution
 import           Symbolic            (SymObj (..), prelSymCons)
-import           Utils               ((<$>), foldM, mapFst, mapM)
+import           Utils               ((<$>), foldM, mapFst, mapM, ppFM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa
@@ -118,7 +119,7 @@ data SMTInfo = SMTInfo
 
 initSMTInfo :: SMTInfo
 initSMTInfo = SMTInfo
-  { smtDecls = [tvarDecl, funDecl]
+  { smtDecls = []
   , smtVars  = emptyFM (<)
   , smtTMap  = predefTypes
   , smtCMap  = predefCons
@@ -195,11 +196,14 @@ getArgs vi smtInfo = case lookupFM (smtVars smtInfo) vi of
   Nothing -> []
   Just ti -> args ti
 
---- Create an SMTLib sort representation for the given FlatCurry type
-newSMTSort :: QName -> SMTTrans ()
-newSMTSort qn@(_, tc) = modify $ \smtInfo -> case lookupType qn smtInfo of
-  Nothing -> smtInfo { smtTMap = addToBM qn tc (smtTMap smtInfo) }
-  Just _  -> smtInfo
+--- Lookup or generate SMTLib sort representation for the given FlatCurry type
+newSMTSort :: QName -> SMTTrans SMT.Symbol
+newSMTSort qn@(_, tc) = do
+  smtInfo <- get
+  case lookupType qn smtInfo of
+    Nothing  -> do put smtInfo { smtTMap = addToBM qn tc (smtTMap smtInfo) }
+                   return tc
+    Just tc' -> return tc'
 
 --- Create an SMTLib constructor for the given typed FlatCurry constructor
 newSMTCons :: SymObj -> SMTTrans ()
@@ -217,12 +221,16 @@ tdecl2SMT :: TypeDecl -> SMTTrans ()
 tdecl2SMT td = case td of
   Type qn@(_, t) _ tvs cs
     | not $ any (`isPrefixOf` t) ignoredTypes -> do
-        newSMTSort qn
+        s   <- newSMTSort qn
         cs' <- mapM (cdecl2SMT (TCons qn (map TVar tvs))) cs
-        return ()
-        addSMTDecl (SMT.DeclareDatatypes (map (typeVars !!) tvs)
-          (lookupWithDefaultBM t qn predefTypes) cs')
-  _                                        -> return ()
+        addSMTDecl $
+          SMT.DeclareDatatypes [(SMT.SortDecl s (length tvs), newDT tvs cs')]
+  _                                           -> return ()
+
+newDT :: [TVarIndex] -> [SMT.ConsDecl] -> SMT.DTDecl
+newDT tvars cs
+  | null tvars = SMT.MT cs
+  | otherwise  = SMT.PT (map (typeVars !!) tvars) cs
 
 cdecl2SMT :: TypeExpr -> ConsDecl -> SMTTrans SMT.ConsDecl
 cdecl2SMT rty (Cons qn@(_, c) _ _ tys) = do
@@ -246,6 +254,12 @@ cons2SMT smtInfo tqn@(SymCons qn _) v = case lookupSMTCons tqn smtInfo of
                ++ show qn
   Just c  -> SMT.As c (getSMTSort v smtInfo)
 cons2SMT _ (SymLit _ _) _ = error $ "FCY2SMTLib.cons2SMT: symbolic literal"
+
+--- Transform a FlatCurry literal to SMT-LIB
+lit2SMT :: Literal -> SMT.Term
+lit2SMT (Intc   i) = tint   i
+lit2SMT (Floatc f) = tfloat f
+lit2SMT (Charc  _) = error "SMTLib.Goodies.lit2SMT: Characters are not supported"
 
 --- Transform a constructor expression into an SMTLib term
 -- toTerm :: SMTInfo -> SymCons -> [VarIndex] -> SMT.Term
@@ -286,7 +300,7 @@ fromSpecConst (SMT.Str _) = error "FCY2SMTLib.fromSpecConst: strings not support
 toSort :: SMTInfo -> TypeExpr -> SMT.Sort
 toSort _       (ForallType _ _) = error "FCY2SMT.toSort"
 toSort _       (TVar         _) = tyOrdering
-toSort _       (FuncType   _ _) = tyFun
+toSort smtInfo (FuncType t1 t2) = tyFun (map (toSort smtInfo) [t1, t2])
 toSort smtInfo (TCons   qn tys) = case lookupType qn smtInfo of
   Nothing -> error $ "Eval.toSort: No SMTLIB representation for type constructor "
                  ++ show qn
@@ -323,14 +337,6 @@ predefCons = listToBM (<) (<) $
 --- data types which are ignored regarding the generation of SMT data type declarations
 ignoredTypes :: [String]
 ignoredTypes =  ["Bool", "Int", "Float", "Char", "_Dict", "IO", "[]", "(->)"]
-
---- Sort to represent polymorphism in SMTLib
-tvarDecl :: SMT.Command
-tvarDecl = SMT.DeclareDatatypes [] "TVar" [SMT.Cons "tvar" []]
-
---- Sort to represent functional types in SMTLib
-funDecl :: SMT.Command
-funDecl = SMT.DeclareDatatypes [] "Fun" [SMT.Cons "fun" []]
 
 -- helper
 

@@ -2,7 +2,7 @@
 --- Command line options for the concolic testing tool.
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version October 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
   (CCTOpts (..), Strategy (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
@@ -39,7 +39,7 @@ defCCTOpts = CCTOpts
   , optDumpEval    = False
   , optDumpSearch  = False
   , optDumpSMT     = False
-  , optIncremental = False
+  , optIncremental = True
   , optImportPaths = []
   , optVerbosity   = Status
   , optStrategy    = DFS

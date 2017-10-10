@@ -3,7 +3,7 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
@@ -11,15 +11,16 @@ module Eval where
 import FiniteMap (filterFM, maxFM)
 
 import FlatCurry.Annotated.Goodies hiding (range)
+import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
 import List                        ((\\), find, intersect, nub)
+import Text.Pretty hiding (combine)
 
 import CCTOptions                  (CCTOpts (..), Strategy (..))
 import FCYFunctorInstances
 import FlatCurryGoodies
 import Heap
 import Output                      (traceEval, traceInfo)
-import PrettyPrint hiding          (combine)
 import Substitution
 import Symbolic
 import Utils

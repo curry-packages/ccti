@@ -1,29 +1,30 @@
 module ccti (main) where
 
-import Directory                 (doesFileExist)
-import Distribution              ( FrontendParams, FrontendTarget (FCY)
-                                 , callFrontendWithParams
-                                 , defaultParams, fullPath, getLoadPathForModule
-                                 , inCurrySubdir, lookupModuleSourceInLoadPath
-                                 , rcParams, setFullPath, setQuiet, setSpecials
-                                 , stripCurrySuffix, sysLibPath
-                                 )
-import FileGoodies               (getFileInPath)
-import FilePath                  ((<.>), (</>), takeFileName)
+import Directory                  (doesFileExist)
+import Distribution               ( FrontendParams, FrontendTarget (FCY)
+                                  , callFrontendWithParams
+                                  , defaultParams, fullPath, getLoadPathForModule
+                                  , inCurrySubdir, lookupModuleSourceInLoadPath
+                                  , rcParams, setFullPath, setQuiet, setSpecials
+                                  , stripCurrySuffix, sysLibPath
+                                  )
+import FileGoodies                (getFileInPath)
+import FilePath                   ((<.>), (</>), takeFileName)
+import FlatCurry.Annotated.Pretty (ppFuncDecls)
 import FlatCurry.Annotated.Types
-import List                      (nub)
-import Maybe                     (fromMaybe)
-import ReadShowTerm              (readUnqualifiedTerm)
-import System                    (exitWith, getProgName)
+import List                       (nub)
+import Maybe                      (fromMaybe)
+import ReadShowTerm               (readUnqualifiedTerm)
+import System                     (exitWith, getProgName)
+import Text.Pretty hiding         ((</>))
 
-import CCTOptions                (CCTOpts (..), Strategy (..), badUsage, getOpts)
+import CCTOptions                 (CCTOpts (..), Strategy (..), badUsage, getOpts)
 import FCYFunctorInstances
-import FCY2SMTLib                (fcy2SMT)
-import FlatCurryGoodies          (extendAnn, getMainBody, printExpr)
-import IdentifyCases             (idCases)
-import Output                    (debug, status)
-import PrettyPrint hiding        ((</>))
-import Search                    (csearch)
+import FCY2SMTLib                 (fcy2SMT)
+import FlatCurryGoodies           (extendAnn, getMainBody)
+import IdentifyCases              (idCases)
+import Output                     (debug, status)
+import Search                     (csearch, ppTestCase)
 
 main :: IO ()
 main = do

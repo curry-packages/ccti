@@ -4,15 +4,15 @@
 --- Currently only the Z3 SMT solver is supported.
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Solver where
 
 import IO
 import IOExts                        (execCmd)
 import List                          (partition)
+import Text.Pretty
 
-import           PrettyPrint
 import           SMTLib.Goodies      (isDeclData)
 import           SMTLib.Parser       (parseCmdRsps)
 import           SMTLib.Pretty
@@ -194,29 +194,3 @@ hGetUntil h d = do
   l <- hGetLine h
   if l == d then return ""
             else hGetUntil h d >>= \ls -> return (l ++ '\n' : ls)
-
--- test
-
--- example :: IO ()
--- example = do
---   s <- newSession z3
---   addCmds s [ SMT.DeclareDatatypes ["a"] "Maybe" [SMT.Cons "nothing" [], SMT.Cons "just" [SMT.SV "just_1" (SMT.SComb "a" [])]]
---             , SMT.DeclareDatatypes [] "Unit" [SMT.Cons "unit" []]
---             ]
---   addCmds s [ SMT.DeclareConst "x1" (SMT.SComb "Maybe" [SMT.SComb "Bool" []])
---             , SMT.DeclareConst "x2" (SMT.SComb "Maybe" [SMT.SComb "Bool" []])
---             ]
---   addCmds s [ SMT.Assert (SMT.TComb (SMT.Id "not") [SMT.TComb (SMT.Id "=") [SMT.TComb (SMT.Id "x2") [], SMT.TComb (SMT.Id "nothing") []]]) -- (SMT.As "nothing" (SMT.SComb "Maybe" [SMT.SComb "Unit" []])) []]])
---             , SMT.Assert (SMT.TComb (SMT.Id "=") [SMT.TComb (SMT.Id "x2") [], SMT.TComb (SMT.Id "x1") []])
---             ]
---   sat <- checkSat s
---   case sat of
---     Sat -> do
---       t1 <- getValues s [SMT.TComb (SMT.Id "x1") []]
---       putStrLn (show t1)
---       checkSat s
---       t2 <- getValues s [SMT.TComb (SMT.Id "x2") []]
---       putStrLn (show t2)
---       terminateSession s
---     _   -> terminateSession s
-

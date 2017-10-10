@@ -1,134 +1,126 @@
 --- ----------------------------------------------------------------------------
---- This module provides some goodies and utility functions for SMTLib.
+--- This module provides some goodies and utility functions for SMT-LIB.
 ---
 --- @author  Jan Tikovsky
---- @version August 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Goodies where
 
-import FlatCurry.Types  (VarIndex, Literal (..))
-
 import SMTLib.Types
-import Symbolic     (LConstr (..))
 
---- Transform a FlatCurry variable index into an SMTLib symbol
-var2SMT :: VarIndex -> Symbol
-var2SMT vi = 'x' : show (abs vi)
+--------------------------------------------------------------------------------
+-- Smart constructors for SMT terms
+--------------------------------------------------------------------------------
 
---- smart constructors for SMT terms
-
---- smart constructor for literal terms
-lit2SMT :: Literal -> Term
-lit2SMT (Intc   i) = tint   i
-lit2SMT (Floatc f) = tfloat f
-lit2SMT (Charc  _) = error "SMTLib.Goodies.lit2SMT: Characters are not supported"
-
---- smart constructor for integer SMT terms
+--- Construct SMT-LIB term from given integer
 tint :: Int -> Term
 tint = TConst . Num
 
---- smart constructor for floating point SMT terms
+--- Construct SMT-LIB term from given float
 tfloat :: Float -> Term
 tfloat = TConst . Dec
 
---- smart constructor for character SMT terms (represented as string)
+--- Construct SMT-LIB term from given character
 tchar :: Char -> Term
 tchar = TConst . Str . (: [])
 
---- smart constructor for variables
-tvar :: VarIndex -> Term
+--- Construct SMT-LIB term from given variable index
+tvar :: Int -> Term
 tvar vi = tcomb (var2SMT vi) []
 
---- smart constructor for constructor terms
+--- Construct SMT-LIB constructor term
 tcomb :: Ident -> [Term] -> Term
 tcomb i ts = TComb (Id i) ts
 
---- smart constructor for qualified constructor terms
+--- Construct qualified SMT-LIB constructor term
 qtcomb :: QIdent -> [Term] -> Term
 qtcomb qi ts = TComb qi ts
 
---- smart constructor for universally quantified terms
-forAll :: [VarIndex] -> [Sort] -> Term -> Term
+--- Construct universally quantified SMT-LIB term
+forAll :: [Int] -> [Sort] -> Term -> Term
 forAll vs ss t = case vs of
   [] -> t
   _  -> Forall (zipWith SV (map var2SMT vs) ss) t
 
---- smart constructors for SMT sorts
-
---- smart constructor for a sort representing Curry's 'Ordering' type
-tyOrdering :: Sort
-tyOrdering = SComb "Ordering" []
-
---- smart constructor for a sort representing a functional type
-tyFun :: Sort
-tyFun = SComb "Fun" []
-
---- smart constructor for sorts
-tyComb :: Ident -> [Sort] -> Sort
-tyComb i ss = SComb i ss
-
---- smart constructor for a negated SMT term
+--- Negate given SMT-LIB term
 tneg :: Term -> Term
 tneg t = tcomb "not" [t]
 
---- smart constructor for an equational SMT term
+--- Constrain two SMT-LIB terms to be equal
 (=%) :: Term -> Term -> Term
 t1 =% t2 = tcomb "=" [t1, t2]
 
---- smart constructor for an inequational SMT term
+--- Constrain two SMT-LIB terms to be different
 (/=%) :: Term -> Term -> Term
 t1 /=% t2 = tcomb "not" [tcomb "=" [t1, t2]]
 
+--- Constrain two SMT-LIB terms with a less-than-relation
 (<%) :: Term -> Term -> Term
 t1 <% t2 = tcomb "<" [t1, t2]
 
+--- Constrain two SMT-LIB terms with a less-than-or-equal-relation
 (<=%) :: Term -> Term -> Term
 t1 <=% t2 = tcomb "<=" [t1, t2]
 
+--- Constrain two SMT-LIB terms with a greater-than-relation
 (>%) :: Term -> Term -> Term
 t1 >% t2 = tcomb ">" [t1, t2]
 
+--- Constrain two SMT-LIB terms with a greater-than-or-equal-relation
 (>=%) :: Term -> Term -> Term
 t1 >=% t2 = tcomb ">=" [t1, t2]
 
-lcs2SMT :: LConstr -> Term -> Term -> Term
-lcs2SMT E  = (=%)
-lcs2SMT NE = (/=%)
-lcs2SMT L  = (<%)
-lcs2SMT LE = (<=%)
-lcs2SMT G  = (>%)
-lcs2SMT GE = (>=%)
-
---- smart constructor for conjunctions of constraints
+--- Combine a list of SMT-LIB terms using a conjunction
 tand :: [Term] -> Term
 tand = tcomb "and"
 
 --- Constrain an SMT variable to be distinct from the given SMT constructors
-noneOf :: VarIndex -> VarIndex -> [(QIdent, [Sort])] -> [Term]
+noneOf :: Int -> Int -> [(QIdent, [Sort])] -> [Term]
 noneOf idx dv qis = snd $ foldr ineq (idx, []) qis
   where ineq (qi, ss) (vi, cs) =
           let vn = vi - length ss
               vs = [vi, vi - 1 .. vn + 1]
           in (vn, forAll vs ss (tvar dv /=% qtcomb qi (map tvar vs)) : cs)
 
---- Generate a `nop` command
+--------------------------------------------------------------------------------
+-- Smart constructors for SMT sorts
+--------------------------------------------------------------------------------
+
+--- Construct an SMT-LIB sort
+tyComb :: Ident -> [Sort] -> Sort
+tyComb i ss = SComb i ss
+
+--- Representation of 'Ordering' type as SMT-LIB sort
+tyOrdering :: Sort
+tyOrdering = tyComb "Ordering" []
+
+--- Representation of a functional type as SMT-LIB sort
+tyFun :: [Sort] -> Sort
+tyFun = tyComb "Fun"
+
+--- Generate a `nop` SMT-LIB command
 nop :: Command
 nop = Echo ""
 
---- Generate an `Assert` command for a given list of SMT terms
+--- Generate an `assert` SMT-LIB command
 assert :: [Term] -> Command
 assert ts = case ts of
   []  -> nop
   [t] -> Assert t
   _   -> Assert $ tand ts
 
---- Get the unqualified identifier of an `QIdent`
+--- Get the unqualified identifier of a qualified SMT-LIB identifier
 unqual :: QIdent -> Ident
 unqual (Id   i) = i
 unqual (As i _) = i
 
---- Is given command a declaration of an algebraic data type
+--- Is given SMT-LIB command a declaration of an algebraic data type
 isDeclData :: Command -> Bool
 isDeclData cmd = case cmd of
-  DeclareDatatypes _ _ _ -> True
-  _                      -> False
+  DeclareDatatype _ _ -> True
+  DeclareDatatypes  _ -> True
+  _                   -> False
+
+--- Transform a FlatCurry variable index into an SMT-LIB symbol
+var2SMT :: Int -> Symbol
+var2SMT vi = 'x' : show (abs vi)

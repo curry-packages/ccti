@@ -1,13 +1,18 @@
 --- ----------------------------------------------------------------------------
---- This module provides a pretty printer for the SMT-LIB language.
+--- This module provides a pretty printer for the SMT-LIB language (v2.6).
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version September 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Pretty where
 
+import Text.Pretty
+
 import SMTLib.Types
-import PrettyPrint
+
+--- Pretty print the given documents separated with spaces and parenthesized
+parent :: [Doc] -> Doc
+parent = encloseSep lparen rparen space
 
 --- Show an SMT-LIB script
 showSMT :: [Command] -> String
@@ -50,6 +55,9 @@ instance Pretty QIdent where
 instance Pretty SortedVar where
   pretty (SV sym s) = parent [text sym, pretty s]
 
+instance Pretty Pattern where
+  pretty (PComb sym ss) = parensIf (not $ null ss) (hsep (map text (sym:ss)))
+
 instance Pretty Term where
   pretty (TConst     c) = pretty c
   pretty (TComb  qi ts) = parensIf (not $ null ts) $
@@ -64,6 +72,11 @@ instance Pretty Term where
                                  , parent (map pretty svs)
                                  , pretty t
                                  ]
+  pretty (Match   t bs) = parent [ text "match"
+                                 , pretty t
+                                 , parent (map ppBranch bs)
+                                 ]
+    where ppBranch (p, bt) = parent [pretty p, pretty bt]
   pretty (Annot   t as) = parent [char '!', pretty t, hsep (map pretty as)]
 
 instance Pretty SortSymDecl where
@@ -86,14 +99,14 @@ instance Pretty ParFunSymDecl where
            , parent [text i, hsep (map pretty ss), hsep (map pretty as)]]
 
 instance Pretty TheoryAttr where
-  pretty (Sorts   sdecls) = text ":sorts" <+> parent (map pretty sdecls)
-  pretty (Funs    pdecls) = text ":funs" <+> parent (map pretty pdecls)
-  pretty (SortsDesc  str) = text ":sorts-description" <+> text str
-  pretty (FunsDesc   str) = text ":funs-description"  <+> text str
-  pretty (Definition str) = text ":definition"        <+> text str
-  pretty (Values     str) = text ":values"            <+> text str
-  pretty (Notes      str) = text ":notes"             <+> text str
-  pretty (TAttr        a) = pretty a
+  pretty (TASorts   sdecls) = text ":sorts" <+> parent (map pretty sdecls)
+  pretty (TAFuns    pdecls) = text ":funs" <+> parent (map pretty pdecls)
+  pretty (TASortsDesc  str) = text ":sorts-description" <+> text str
+  pretty (TAFunsDesc   str) = text ":funs-description"  <+> text str
+  pretty (TADefinition str) = text ":definition"        <+> text str
+  pretty (TAValues     str) = text ":values"            <+> text str
+  pretty (TANotes      str) = text ":notes"             <+> text str
+  pretty (TA             a) = pretty a
 
 instance Pretty Theory where
   pretty (Theory sym tas) = parent [ text "theory"
@@ -149,9 +162,18 @@ instance Pretty PropLit where
 instance Pretty Command where
   pretty = parent . ppCmd
 
+instance Pretty SortDecl where
+  pretty (SortDecl sym a) = parent [text sym, int a]
+
+instance Pretty DTDecl where
+  pretty (MT     cs) = parent (map pretty cs)
+  pretty (PT tys cs) = parent [ text "par"
+                              , parent (map text tys)
+                              , parent (map pretty cs)
+                              ]
+
 instance Pretty ConsDecl where
-  pretty (Cons i svs) = parensIf (not $ null svs) $
-                          text i <+> (hsep (map pretty svs))
+  pretty (Cons sym svs) = parent [text sym, (hsep (map pretty svs))]
 
 --- Pretty printing of SMT-LIB commands.
 ppCmd :: Command -> [Doc]
@@ -161,9 +183,14 @@ ppCmd (CheckSatAssuming       ps) = [ text "check-sat-assuming"
                                     , parent (map pretty ps)
                                     ]
 ppCmd (DeclareConst        sym s) = [text "declare-const", text sym, pretty s]
-ppCmd (DeclareDatatypes tys s cs) = [ text "declare-datatypes"
-                                    , parent (map text tys)
-                                    , parens (parent (text s : map pretty cs))
+ppCmd (DeclareDatatype       s d) = [ text "declare-datatype"
+                                    , text s
+                                    , pretty d
+                                    ]
+ppCmd (DeclareDatatypes      sds) = let (ss, ds) = unzip sds in
+                                    [ text "declare-datatypes"
+                                    , parent (map pretty ss)
+                                    , parent (map pretty ds)
                                     ]
 ppCmd (DeclareFun       sym ss s) = [ text "declare-fun"
                                     , text sym
@@ -225,6 +252,36 @@ instance Pretty Logic where
   pretty UFLRA    = text "UFLRA"
   pretty UFNIA    = text "UFNIA"
 
+instance Pretty ErrorBehavior where
+  pretty ImmediateExit      = text "immediate-exit"
+  pretty ContinuedExecution = text "continued-execution"
+
+instance Pretty ReasonUnknown where
+  pretty Memout        = text "memout"
+  pretty Incomplete    = text "incomplete"
+  pretty (SEReason se) = pretty se
+
+instance Pretty ModelRsp where
+  pretty (MRFun       f) = parent [text "define-fun", pretty f]
+  pretty (MRFunRec    f) = parent [text "define-fun-rec", pretty f]
+  pretty (MRFunsRec fts) = let (fs, ts) = unzip fts
+                           in parent [ text "define-funs-rec"
+                                     , parent (map pretty fs)
+                                     , parent (map pretty ts)
+                                     ]
+
+instance Pretty InfoRsp where
+  pretty (AssertionStackLevelsRsp n) = text ":assertion-stack-levels" <+> int n
+  pretty (AuthorsRsp            str) = text ":authors" <+> text str
+  pretty (ErrorBehaviorRsp       eb) = text ":error-behavior" <+> pretty eb
+  pretty (NameRsp               str) = text ":name" <+> text str
+  pretty (ReasonUnknownRsp       ru) = text ":reason-unknown" <+> pretty ru
+  pretty (VersionRsp            str) = text ":version" <+> text str
+  pretty (AttrRsp                 a) = pretty a
+
+ppValPair :: ValuationPair -> Doc
+ppValPair (t1, t2) = parent [pretty t1, pretty t2]
+
 instance Pretty CmdResponse where
   pretty SuccessRsp                    = text "success"
   pretty UnsupportedRsp                = text "unsupported"
@@ -243,37 +300,7 @@ instance Pretty CmdResponse where
   pretty (GetUnsatCoreRsp        syms) = parent (map text syms)
   pretty (GetValueRsp              vs) = parent (map ppValPair vs)
 
-ppValPair :: ValuationPair -> Doc
-ppValPair (t1, t2) = parent [pretty t1, pretty t2]
-
 instance Pretty CheckSat where
   pretty Sat     = text "sat"
   pretty Unsat   = text "unsat"
   pretty Unknown = text "unknown"
-
-instance Pretty InfoRsp where
-  pretty (AssertionStackLevelsRsp n) = text ":assertion-stack-levels" <+> int n
-  pretty (AuthorsRsp            str) = text ":authors" <+> text str
-  pretty (ErrorBehaviorRsp       eb) = text ":error-behavior" <+> pretty eb
-  pretty (NameRsp               str) = text ":name" <+> text str
-  pretty (ReasonUnknownRsp       ru) = text ":reason-unknown" <+> pretty ru
-  pretty (VersionRsp            str) = text ":version" <+> text str
-  pretty (AttrRsp                 a) = pretty a
-
-instance Pretty ErrorBehavior where
-  pretty ImmediateExit      = text "immediate-exit"
-  pretty ContinuedExecution = text "continued-execution"
-
-instance Pretty ReasonUnknown where
-  pretty Memout        = text "memout"
-  pretty Incomplete    = text "incomplete"
-  pretty (SEReason se) = pretty se
-
-instance Pretty ModelRsp where
-  pretty (MRFun       f) = parent [text "define-fun", pretty f]
-  pretty (MRFunRec    f) = parent [text "define-fun-rec", pretty f]
-  pretty (MRFunsRec fts) = let (fs, ts) = unzip fts
-                           in parent [ text "define-funs-rec"
-                                     , parent (map pretty fs)
-                                     , parent (map pretty ts)
-                                     ]

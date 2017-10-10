@@ -4,7 +4,7 @@
 --- namely command responses.
 ---
 --- @author  Jan Tikovsky
---- @version July 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module SMTLib.Parser where
 
@@ -155,8 +155,6 @@ parseStr = Parser $ \tokens -> case tokens of
     RParen     -> ")"
     t          -> show t
 
---   terminal DQuote *> parseSym <* terminal DQuote
-
 --- parser for a symbol
 parseSym :: SMTParser SMT.Symbol
 parseSym = Parser $ \tokens -> case tokens of
@@ -264,7 +262,3 @@ parseSort = Parser $ \tokens -> case tokens of
   LParen : ts -> (runParser (yield SMT.SComb <*> parseSym <*> some parseSort
                    <*  terminal RParen)) ts
   t      : ts -> (runParser (unexpected t)) ts
-
-
-
-

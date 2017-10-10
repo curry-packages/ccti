@@ -2,9 +2,12 @@
 --- This module provides some utility operations.
 ---
 --- @author  Björn Peemöller, Jan Tikovsky
---- @version June 2017
+--- @version October 2017
 --- ----------------------------------------------------------------------------
 module Utils where
+
+import FiniteMap
+import Text.Pretty
 
 -- some useful combinators for monads
 infixl 4 <$>, <*>
@@ -61,6 +64,10 @@ zip3 xs ys zs = case xs of
             b:bs -> case zs of
                       []   -> []
                       c:cs -> (a, b, c) : zip3 as bs cs
+
+--- Pretty print finite map
+ppFM :: ((a, b) -> Doc) -> FM a b -> Doc
+ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
 
 -- -----------------------------------------------------------------------------
 -- Tuple utilities

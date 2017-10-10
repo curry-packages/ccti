@@ -1,7 +1,9 @@
 module Bimap where
 
 import FiniteMap
-import PrettyPrint
+import Text.Pretty
+
+import Utils (ppFM)
 
 --- bidirectional map
 data BM a b = BM (FM a b) (FM b a)
