@@ -12,7 +12,7 @@ import List                       (nub)
 import Text.Pretty
 
 import FlatCurryGoodies           (boolType, charType, floatType, intType, isBoolType, prel)
-import SMTLib.Types               (Term)
+import Language.SMTLIB            (Term)
 import Utils                      (mapFst)
 
 --- ----------------------------------------------------------------------------

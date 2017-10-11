@@ -10,23 +10,23 @@
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
-import Char                          (toLower)
+import Char                                   (toLower)
 import FiniteMap
-import FlatCurry.Annotated.Goodies   (argTypes, resultType)
-import FlatCurry.Annotated.Pretty    (ppQName, ppTypeExp, ppVarIndex)
+import FlatCurry.Annotated.Goodies            (argTypes, resultType)
+import FlatCurry.Annotated.Pretty             (ppQName, ppTypeExp, ppVarIndex)
 import FlatCurry.Annotated.Types
-import List                          (isPrefixOf)
-import Text.Pretty hiding (compose)
+import List                                   (isPrefixOf)
+import Text.Pretty hiding                     (compose)
 
 import           Bimap
 import           FCYFunctorInstances
 import           FlatCurryGoodies
-import           SMTLib.Goodies
-import           SMTLib.Pretty
-import qualified SMTLib.Types as SMT
+import           Language.SMTLIB.Goodies
+import           Language.SMTLIB.Pretty
+import qualified Language.SMTLIB.Types as SMT
 import           Substitution
-import           Symbolic            (SymObj (..), prelSymCons)
-import           Utils               ((<$>), foldM, mapFst, mapM, ppFM)
+import           Symbolic                     (SymObj (..), prelSymCons)
+import           Utils                        ((<$>), foldM, mapFst, mapM, ppFM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa

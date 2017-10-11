@@ -6,17 +6,17 @@
 --- @author  Jan Tikovsky
 --- @version October 2017
 --- ----------------------------------------------------------------------------
-module SMTLib.Solver where
+module SMT.Solver where
 
 import IO
 import IOExts                        (execCmd)
 import List                          (partition)
 import Text.Pretty
 
-import           SMTLib.Goodies      (isDeclData)
-import           SMTLib.Parser       (parseCmdRsps)
-import           SMTLib.Pretty
-import qualified SMTLib.Types as SMT
+import           Language.SMTLIB.Goodies      (isDeclData)
+import           Language.SMTLIB.Parser       (parseCmdRsps)
+import           Language.SMTLIB.Pretty
+import qualified Language.SMTLIB.Types as SMT
 
 data Solver = SMT { executable :: String, flags :: [String] }
 

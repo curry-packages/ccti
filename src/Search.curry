@@ -16,11 +16,8 @@ import FCYFunctorInstances
 import FlatCurryGoodies            (TypeAnn, resArgTypes)
 import Output
 import Search.DFS
-import SMTLib.Goodies
-import SMTLib.Pretty               (showSMT)
-import SMTLib.Solver
-import SMTLib.Types                ( Command (..), QIdent, Sort (..), SMTLib (..)
-                                   , Sort, Term )
+import Language.SMTLIB
+import SMT.Solver
 import Substitution                ( AExpSubst, compose, dom, mkSubst, restrict
                                    , subst)
 import Symbolic
