@@ -9,13 +9,13 @@ import List                        (delete, intersect, union)
 import Text.Pretty hiding          (compose)
 
 import CCTOptions                  (CCTOpts (..))
+import Data.PQ
 import FCY2SMTLib
 import Eval                        ( CEState (..), ceval, fromSubst, initCEState
                                    , norm )
 import FCYFunctorInstances
 import FlatCurryGoodies            (TypeAnn, resArgTypes)
 import Output
-import Search.DFS
 import Language.SMTLIB
 import SMT.Solver
 import Substitution                ( AExpSubst, compose, dom, mkSubst, restrict
@@ -25,6 +25,9 @@ import Utils                       (fst3, mapM, mapM_, unlessM, ppFM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type UVNodes = FM CaseID CaseInfo
+
+--- Represent symbolic execution tree by priority queue
+type SymTree = PQ Depth SymNode
 
 --- Information on case expressions required for the concolic search, namely:
 ---   * numbers of unvisited branches
@@ -68,7 +71,7 @@ initCSState :: CCTOpts -> SMTInfo -> SolverSession -> [VarIndex] -> CSState
 initCSState opts smtInfo session sargs = CSState
   { cssCCTOpts = opts
   , cssSMTInfo = smtInfo
-  , cssTree    = newTree
+  , cssTree    = emptyPQ
   , cssUVNodes = emptyFM (<)
   , cssSession = session
   , cssTests   = []
@@ -181,7 +184,7 @@ processTrace trace tree uvNodes smtInfo
         -- extended list of known variables
         vs'     = v : vs
         -- extended symbolic tree
-        st'     = addNode (SymNode d cid cidcs' cs vs v) st
+        st'     = enqueue d (SymNode d cid cidcs' cs vs v) st
         -- updated type environment
         smtEnv' = execSMTTrans (updTypeEnv (v:args) (soType sobj) args) smtEnv
         -- generate constraint information
@@ -265,7 +268,7 @@ searchLoopN d sub ceState e
   mapM_ updSymInfo ts
 --   prepSearch tcase ts
   st  <- getSymTree
-  io $ debugSearch opts $ "Priority Queue: " ++ pPrint (ppFM (\(_,n) -> text (show n)) st)
+  io $ debugSearch opts $ "Priority Queue: " ++ pPrint (pretty st)
   uv <- getUVNodes
   io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
   nxt <- nextSymNode
@@ -305,21 +308,20 @@ nextSymNode = do
   opts <- getOpts
   uvn  <- getUVNodes
   st   <- getSymTree
-  case nextNode st of
+  case dequeue st of
     Nothing                        -> return Nothing
-    Just n@(SymNode d cid _ _ _ _)
+    Just (n@(SymNode d cid _ _ _ _), st')
       | d > optSearchDepth opts    -> return Nothing
       | hasUnvis cid uvn           -> return (Just n)
-      | otherwise                  -> setSymTree (delNode d st) >> nextSymNode
+      | otherwise                  -> setSymTree st' >> nextSymNode
 
 --- Remove next node from symbolic tree
 rmvSymNode :: CSM ()
 rmvSymNode = do
-  mnode <- nextSymNode
-  st    <- getSymTree
-  case mnode of
-    Nothing -> return ()
-    Just (SymNode d _ _ _ _ _) -> setSymTree (delNode d st)
+  st <- getSymTree
+  case dequeue st of
+    Nothing       -> return ()
+    Just (_, st') -> setSymTree st'
 
 hasUnvis :: CaseID -> UVNodes -> Bool
 hasUnvis cid uv = case lookupFM uv cid of
