@@ -463,13 +463,16 @@ hnfCase ann ct e bs = do
       | ct == Rigid -> error "Suspended"
       | otherwise   -> narrowCase
       where
-        narrowCase = foldr choice (failS ty) $ zipWith guess [1 ..] bs
+        narrowCase = case bs of
+          [] -> error "Eval.narrowCase: Found case expression without branches"
+          _  -> foldr1 choice $ zipWith guess [1 ..] bs
 
         guess _ (ABranch (ALPattern  ty' l) be) = do
           bindE i (ALit ty' l)
           hnf be
         guess n (ABranch (APattern ty' c txs) be) = do
           ys  <- freshVars (length txs)
+          mapM_ bindF ys
           mkDecision e cid (BNr n bcnt) vi c ys
           let (xs, tys) = unzip txs
               es'       = zipWith AVar tys ys
