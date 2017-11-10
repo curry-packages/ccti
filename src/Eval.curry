@@ -459,7 +459,7 @@ hnfCase ann ct e bs = do
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
       where ty = annExpr v
-    AVar ty i
+    AVar _ i
       | ct == Rigid -> error "Suspended"
       | otherwise   -> narrowCase
       where

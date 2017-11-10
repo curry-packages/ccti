@@ -6,6 +6,8 @@
 --- ----------------------------------------------------------------------------
 module Data.DList where
 
+import List (nub)
+
 data DList a = DL { unDL :: [a] -> [a] }
 
 --- Create an empty diff list
@@ -31,6 +33,10 @@ fromList = DL . (++)
 --- Convert a diff list to a list
 toList :: DList a -> [a]
 toList = ($ []) . unDL
+
+--- Convert a diff list to a duplicate free list
+toListNub :: Eq a => DList a -> [a]
+toListNub = nub . toList
 
 --- Get the head element of a diff list
 hd :: DList a -> a

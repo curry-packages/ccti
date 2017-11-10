@@ -10,12 +10,9 @@ module Data.PQ (PQ, emptyPQ, findMin, enqueue, dequeue, merge) where
 import Data.DList
 import Text.Pretty
 
---- Priority queue
-type PQ = Heap
-
--- pairing heap
-data Heap k v = Empty
-              | Heap k (DList v) [Heap k v]
+--- Priority queue implementation with pairing heaps
+data PQ k v = Empty
+            | PQ k (DList v) [PQ k v]
  deriving Show
 
 --- Create an empty priority queue
@@ -23,32 +20,33 @@ emptyPQ :: PQ k v
 emptyPQ = Empty
 
 --- Get the element with the minimum key from the priority queue
-findMin :: PQ k v -> Maybe v
-findMin Empty         = Nothing
-findMin (Heap _ vs _) = Just (hd vs)
+findMin :: Eq v => PQ k v -> Maybe v
+findMin Empty       = Nothing
+findMin (PQ _ vs _) = case toListNub vs of
+  []    -> error "Data.PQ.findMin: Unexpected empty value list"
+  (w:_) -> Just w
 
 --- Add an element to the priority queue using the given key
 enqueue :: Ord k => k -> v -> PQ k v -> PQ k v
-enqueue k v = merge (Heap k (singleton v) [])
+enqueue k v = merge (PQ k (singleton v) [])
 
 --- Remove an element from the priority queue and return it together with the remaining queue
-dequeue :: Ord k => PQ k v -> Maybe (v, PQ k v)
-dequeue Empty          = Nothing
-dequeue (Heap k vs hs) = case toList vs of
+dequeue :: (Ord k, Eq v) => PQ k v -> Maybe (v, PQ k v)
+dequeue Empty        = Nothing
+dequeue (PQ k vs hs) = case toListNub vs of
   []     -> error "Data.PQ.dequeue: Unexpected empty value list"
   [w]    -> Just (w, mergePairs hs)
-  (w:ws) -> Just (w, Heap k (fromList ws) hs)
-
+  (w:ws) -> Just (w, PQ k (fromList ws) hs)
 
 --- Merge two priority queues
 merge :: Ord k => PQ k v -> PQ k v -> PQ k v
 merge h1 h2 = case (h1, h2) of
-  (Empty         ,              _) -> h2
-  (_             ,          Empty) -> h1
-  (Heap k1 v1 hs1, Heap k2 v2 hs2)
-    | k1 <  k2                     -> Heap k1 v1             (h2 : hs1)
-    | k1 == k2                     -> Heap k1 (append v1 v2) (hs1 ++ hs2)
-    | otherwise                    -> Heap k2 v2             (h1 : hs2)
+  (Empty       ,            _) -> h2
+  (_           ,        Empty) -> h1
+  (PQ k1 v1 hs1, PQ k2 v2 hs2)
+    | k1 <  k2                 -> PQ k1 v1             (h2 : hs1)
+    | k1 == k2                 -> PQ k1 (append v1 v2) (hs1 ++ hs2)
+    | otherwise                -> PQ k2 v2             (h1 : hs2)
 
 -- helper
 
@@ -60,6 +58,6 @@ mergePairs hs = case hs of
 
 -- pretty printing
 
-instance (Pretty k, Show v) => Pretty (Heap k v) where
-  pretty Empty          = text "<>"
-  pretty (Heap k vs hs) = angles (pretty k <> colon <+> list (map (text . show) (toList vs)) <+> list (map pretty hs))
+instance (Pretty k, Show v) => Pretty (PQ k v) where
+  pretty Empty        = text "<>"
+  pretty (PQ k vs hs) = angles (pretty k <> colon <+> list (map (text . show) (toList vs)) <+> list (map pretty hs))
