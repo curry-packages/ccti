@@ -26,7 +26,7 @@ import Symbolic
 import Utils                       (fst3, mapM_, unlessM, ppFM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
-type CoverMap = FM CaseID CoverInfo
+type CoverMap = ContextMap Context CoverInfo
 
 --- Represent symbolic execution tree by priority queue
 type SymTree = PQ Depth SymNode
@@ -124,9 +124,9 @@ getSymArgs = gets cssSymArgs
 addTestCase :: TestCase -> CSM ()
 addTestCase tc = modify $ \s -> s { cssTests = [tc] `union` cssTests s }
 
---- Get the constructors / constraints already covered for a case identifier
-getCovered :: CaseID -> CSM CoveredCs
-getCovered cid = getCoverMap >>= return . covered cid
+--- Get the constructors / constraints already covered for a given context
+getCovered :: Context -> CSM CoveredCs
+getCovered ctxt = getCoverMap >>= return . covered ctxt
 
 --- Get the number of unvisited nodes
 -- numOfUnvis :: CoverMap -> Int
@@ -153,16 +153,19 @@ updSymInfo t = modify $ \s ->
 
 processTrace :: Trace -> UpdSymInfo
 processTrace trace tree uvNodes smtInfo
-  = prcTrace trace 0 [] [] [] tree uvNodes smtInfo
-  where
-  prcTrace []                                  _ _     _  _  st uvn smtEnv = (st, uvn, smtEnv)
-  prcTrace (Decision cid bnr v sobj args : ds) d cidcs cs vs st uvn smtEnv =
+  = prcTrace trace 0 [] [] [] [] 1 tree uvNodes smtInfo
+ where
+  prcTrace []                                  _ _     _  _  _    _  st uvn smtEnv = (st, uvn, smtEnv)
+  prcTrace (Decision cid bnr v sobj args : ds) d cidcs cs vs ctxt cl st uvn smtEnv =
     let -- extended list of required SMT-LIB constant indices
         cidcs'  = cidcs `union` (v : args)
         -- extended list of known variables
         vs'     = v : vs
+        -- extend context information (history of case ids along the execution path)
+        -- the context history is limited by the maximal context length
+        ctxt'   = take cl (cid : ctxt)
         -- extended symbolic tree
-        st'     = enqueueSQ d (SymNode d cid cidcs' cs vs v) st
+        st'     = enqueueSQ d (SymNode d ctxt' cidcs' cs vs v) st
         -- updated type environment
         smtEnv' = execSMTTrans (updTypeEnv (v:args) (soType sobj) args) smtEnv
         -- generate constraint information
@@ -170,8 +173,8 @@ processTrace trace tree uvNodes smtInfo
         -- extended list of path constraints
         cs'     = cs ++ [genPConstr ci v args]
         -- cover traced branch
-        uvn'    = cover cid bnr ci uvn
-    in prcTrace ds (d+1) cidcs' cs' vs' st' uvn' smtEnv'
+        uvn'    = cover ctxt' bnr ci uvn
+    in prcTrace ds (d+1) cidcs' cs' vs' ctxt' cl st' uvn' smtEnv'
 
 --- Generate constraint information
 genCsInfo :: SMTInfo -> SymObj -> VarIndex -> [VarIndex] -> CoveredCs
@@ -235,7 +238,7 @@ searchLoopN d sub ceState e
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (pretty st)
   uv <- getCoverMap
-  io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
+--   io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
   nxt <- nextSymNode
   case nxt of
     Nothing -> return ()
@@ -275,9 +278,9 @@ nextSymNode = do
   st   <- getSymTree
   case dequeueSQ st of
     Nothing                        -> return Nothing
-    Just (n@(SymNode d cid _ _ _ _), st')
+    Just (n@(SymNode d ctxt _ _ _ _), st')
       | d > optSearchDepth opts    -> return Nothing
-      | isCovered cid uvn          -> setSymTree st' >> nextSymNode
+      | isCovered ctxt uvn         -> setSymTree st' >> nextSymNode
       | otherwise                  -> return (Just n)
 
 --- Remove next node from symbolic tree
@@ -291,9 +294,9 @@ rmvSymNode = do
 --- Generate SMT-LIB commands for the variable declarations
 --- and the assertion of path constraints for the given symbolic node
 genSMTCmds :: VarIndex -> SymNode -> CSM [Command]
-genSMTCmds v (SymNode _ cid cidcs pcs _ dv) = do
+genSMTCmds v (SymNode _ ctxt cidcs pcs _ dv) = do
   smtInfo <- getSMTInfo
-  ci      <- getCovered cid
+  ci      <- getCovered ctxt
   let pc = case ci of
              CCons cons   -> noneOf v dv cons
              CConstr constr -> [tneg (constr (tvar dv))]

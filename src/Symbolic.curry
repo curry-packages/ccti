@@ -2,7 +2,7 @@
 --- This module provides data structures for tracing symbolic information.
 ---
 --- @author  Jan Tikovsky
---- @version October 2017
+--- @version November 2017
 --- ----------------------------------------------------------------------------
 module Symbolic where
 
@@ -182,14 +182,14 @@ rnmTrace sargs ds (ts, v) =
 
 --- A symbolic node includes the following information:
 ---   * the depth of the node in the execution tree,
----   * the case id,
+---   * the context of the node, i.e. its case id and preceeding case ids,
 ---   * indices of SMT-LIB constants which are required for the SMT-LIB model
 ---   * possible path constraints (in SMT-LIB representation) and
 ---   * the decision variables introduced up to this node
 ---   * the decision variable of this node
 data SymNode = SymNode
   { depth     :: Depth
-  , cid       :: VarIndex
+  , context   :: Context
   , constants :: [VarIndex]
   , pcs       :: [Term]
   , dvars     :: [VarIndex]
@@ -199,3 +199,6 @@ data SymNode = SymNode
 
 --- Node depth in a symbolic execution tree
 type Depth = Int
+
+--- A context is a case identifier followed by a sequence of preceeding case identifiers
+type Context = [VarIndex]
