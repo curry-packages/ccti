@@ -10,5 +10,8 @@ Curry_Main_Goal.curry
 # curry package manager
 .cpm
 
+# examples folder
+examples/
+
 # binaries
 src/CCTInstr
