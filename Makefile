@@ -21,11 +21,12 @@ build:
 	$(CPM) install                                     # Install package dependencies
 	$(CPM) curry :l src/ccti.curry :save :q
 
-# clean everything (including cpm folder and generated curry files for examples)
+# cleanup everything (including cpm folder, generated curry files for examples as well as any smt-lib dumps)
 .PHONY: cleanall
 cleanall:
 	rm -rf src/.curry
-	rm src/ccti
+	rm -f src/ccti
 	rm -rf .cpm
 	rm -rf examples/.curry
+	rm -rf examples/.smt
 
