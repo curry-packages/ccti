@@ -211,7 +211,11 @@ csearch opts fs v smtInfo e = do
   -- prepare main expression for concolic search
   let (sub, e', v') = norm v e
       ceState       = initCEState opts sub fs v'
-  s <- evalSessions z3 defSMTOpts { globalCmds = smtDecls smtInfo } $
+      smtOpts       = defSMTOpts { globalCmds = smtDecls smtInfo
+                                 , quiet      = not $ optDebugSearch opts
+                                 , tracing    = optDumpSMT opts
+                                 }
+  s <- evalSessions z3 smtOpts { globalCmds = smtDecls smtInfo } $
          execCSM (searchLoop sub ceState e')
                  (initCSState opts smtInfo (dom sub))
   return (cssTests s)

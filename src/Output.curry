@@ -31,18 +31,12 @@ debug opts msg = when (optVerbosity opts >= Debug) (putMsg msg)
 --- Print debug information on concolic evaluation
 debugEval :: CCTOpts -> String -> IO ()
 debugEval opts msg
-  = when (optDumpEval opts || optVerbosity opts >= Debug) (putMsg msg)
+  = when (optDebugEval opts || optVerbosity opts >= Debug) (putMsg msg)
 
 --- Print debug information on concolic search
 debugSearch :: CCTOpts -> String -> IO ()
 debugSearch opts msg
-  = when (optDumpSearch opts || optVerbosity opts >= Debug) (putMsg msg)
-
---- Write a dump of the SMT-LIB commands which were generated during search
---- to a file
-dumpSMT :: CCTOpts -> String -> IO ()
-dumpSMT opts smtScript
-  = when (optDumpSMT opts) (writeFile "smtDump.smt" smtScript)
+  = when (optDebugSearch opts || optVerbosity opts >= Debug) (putMsg msg)
 
 --- Write the given String to the command line with a preceeding line of `=`
 putMsg :: String -> IO ()

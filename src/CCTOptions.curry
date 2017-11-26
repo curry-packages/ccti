@@ -20,8 +20,8 @@ import Utils    (rpad)
 data CCTOpts = CCTOpts
   { optHelp        :: Bool
   , optVersion     :: Bool
-  , optDumpEval    :: Bool
-  , optDumpSearch  :: Bool
+  , optDebugEval   :: Bool
+  , optDebugSearch :: Bool
   , optDumpSMT     :: Bool
   , optIncremental :: Bool
   , optImportPaths :: [String]
@@ -36,8 +36,8 @@ defCCTOpts :: CCTOpts
 defCCTOpts = CCTOpts
   { optHelp        = False
   , optVersion     = False
-  , optDumpEval    = False
-  , optDumpSearch  = False
+  , optDebugEval   = False
+  , optDebugSearch = False
   , optDumpSMT     = False
   , optIncremental = True
   , optImportPaths = []
@@ -83,15 +83,15 @@ options =
   , Option ['V'] ["version"]
       (NoArg (onOpts $ \opts -> opts { optVersion = True }))
       "print version information and exit"
-  , Option [] ["dump-eval"]
-      (NoArg (onOpts $ \opts -> opts { optDumpEval = True }))
+  , Option [] ["debug-eval"]
+      (NoArg (onOpts $ \opts -> opts { optDebugEval = True }))
       "print debug information for concolic evaluation"
-  , Option [] ["dump-search"]
-      (NoArg (onOpts $ \opts -> opts { optDumpSearch = True }))
+  , Option [] ["debug-search"]
+      (NoArg (onOpts $ \opts -> opts { optDebugSearch = True }))
       "print debug information for concolic search"
   , Option [] ["dump-smt"]
       (NoArg (onOpts $ \opts -> opts { optDumpSMT = True }))
-      "write all SMT-LIB commands used during search to a file smtDump.smt"
+      "write all SMT-LIB commands used during search to a file in the folder .smt/"
   , Option [] ["incremental"]
       (NoArg (onOpts $ \opts -> opts { optIncremental = True }))
       "solve path constraints incrementally, if possible"
