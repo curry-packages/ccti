@@ -16,5 +16,4 @@ TODO-Liste
   * Berücksichtigung von externen Funktionen wie +, -, == etc.
   * verschiedene Strategien für konkolische Suche (naive Tiefensuche, Berücksichtigung
     des bisherigen Funktionsaufrufgraphen vgl. @sebf)
-  * Umstellung des Pretty Printers / der SMT-LIB-Repräsentation auf SMT-LIB 2.6
   * Implementierung alternativer coverage Kriterien (call coverage)
