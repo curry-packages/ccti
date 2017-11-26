@@ -1,0 +1,21 @@
+{
+  "name": "ccti",
+  "version": "0.0.1",
+  "author": "Jan Rasmus Tikovsky <jrt@informatik.uni-kiel.de>",
+  "synopsis": "Curry Concolic Testing Interpreter",
+  "category": [ "Programming" ],
+  "license": "BSD-3-Clause",
+  "licenseFile": "LICENSE",
+  "description": "This package provides a tool for the automatic generation of test cases via concolic testing.",
+  "dependencies": {
+      "flatcurry":           ">= 2.0.0",
+      "flatcurry-annotated": ">= 2.0.0",
+      "wl-pprint":           ">= 0.0.1",
+      "smtlib":              ">= 0.0.1",
+      "smtlib-solver":       ">= 0.0.1"
+  },
+  "compilerCompatibility": {
+        "pakcs": ">= 2.0.0",
+        "kics2": ">= 2.0.0"
+    }
+}

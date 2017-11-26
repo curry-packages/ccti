@@ -1,29 +1,39 @@
 module Search where
 
-import FiniteMap                   ( FM, addListToFM, addToFM_C, delFromFM
-                                   , elemFM, emptyFM, foldFM, lookupFM )
+import FiniteMap ( FM, addListToFM, addToFM_C, delFromFM, elemFM, emptyFM
+                 , foldFM, lookupFM )
+
 import FlatCurry.Annotated.Goodies (argTypes)
 import FlatCurry.Annotated.Pretty  (ppExp)
 import FlatCurry.Annotated.Types
-import List                        (delete, intersect, union)
+
+import List (delete, intersect, union)
+
 import Text.Pretty hiding          (compose)
 
-import CCTOptions                  (CCTOpts (..))
-import Data.PQ                     (PQ)
+import CCTOptions (CCTOpts (..))
+
+import Data.PQ (PQ)
+
 import FCY2SMTLib
-import Eval                        ( CEState (..), ceval, fromSubst, initCEState
-                                   , norm )
+import Eval                (CEState (..), ceval, fromSubst, initCEState, norm )
 import FCYFunctorInstances
-import FlatCurryGoodies            (TypeAnn, resArgTypes)
+import FlatCurryGoodies    (TypeAnn, resArgTypes)
 import Output
+
 import Language.SMTLIB
+
 import Search.CaseMap
 import Search.Queue
-import SMT.Solver
-import Substitution                ( AExpSubst, compose, dom, mkSubst, restrict
-                                   , subst)
+
+import Solver.SMTLIB.Z3 ( SMTOpts (..), SMTSess, defSMTOpts, evalSessions
+                        , solveSMTVars, z3)
+-- only needed for lifting of IO actions
+import Solver.SMTLIB.Internal.Interaction (liftIOA, liftSMT)
+
+import Substitution (AExpSubst, compose, dom, mkSubst, restrict, subst)
 import Symbolic
-import Utils                       (fst3, mapM_, unlessM, ppFM, whenM)
+import Utils        (fst3, mapM_, unlessM, ppFM, whenM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type CoverMap = ContextMap Context CoverInfo
@@ -44,19 +54,17 @@ data CSState = CSState
   , cssSMTInfo  :: SMTInfo
   , cssTree     :: SymTree
   , cssCoverMap :: CoverMap
-  , cssSession  :: SolverSession
   , cssTests    :: [TestCase]
   , cssSymArgs  :: [VarIndex]
   }
 
 --- Initial state for the concolic search
-initCSState :: CCTOpts -> SMTInfo -> SolverSession -> [VarIndex] -> CSState
-initCSState opts smtInfo session sargs = CSState
+initCSState :: CCTOpts -> SMTInfo -> [VarIndex] -> CSState
+initCSState opts smtInfo sargs = CSState
   { cssCCTOpts  = opts
   , cssSMTInfo  = smtInfo
   , cssTree     = emptySQ
   , cssCoverMap = emptyCM
-  , cssSession  = session
   , cssTests    = []
   , cssSymArgs  = sargs
   }
@@ -65,14 +73,14 @@ initCSState opts smtInfo session sargs = CSState
 
 -- TODO: replace with StateT CSState IO a when state transformers are available
 --- Concolic search monad
-data CSM a = CS { runCSM :: CSState -> IO (a, CSState) }
+data CSM a = CS { runCSM :: CSState -> SMTSess (a, CSState) }
 
 instance Monad CSM where
   return x = CS $ \s -> return (x, s)
 
   m >>= f = CS $ \s -> runCSM m s >>= \(x, s') -> runCSM (f x) s'
 
-execCSM :: CSM a -> CSState -> IO CSState
+execCSM :: CSM a -> CSState -> SMTSess CSState
 execCSM m s = runCSM m s >>= return . snd
 
 gets :: (CSState -> a) -> CSM a
@@ -87,9 +95,13 @@ put s = CS $ \_ -> return ((), s)
 modify :: (CSState -> CSState) -> CSM ()
 modify f = CS $ \s -> return ((), f s)
 
+--- Lift SMT sessions to CSM
+liftSMTSess :: SMTSess a -> CSM a
+liftSMTSess sess = CS $ \s -> sess >>= \x -> return (x, s)
+
 --- Lift IO actions to CSM
 io :: IO a -> CSM a
-io m = CS $ \s -> m >>= \x -> return (x, s)
+io = liftSMTSess . liftSMT . liftIOA
 
 --------------------------------------------------------------------------------
 
@@ -107,10 +119,6 @@ setSymTree st = modify $ \s -> s { cssTree = st }
 --- Get current map of unvisited branches
 getCoverMap :: CSM CoverMap
 getCoverMap = gets cssCoverMap
-
---- Get current solver session
-getSession :: CSM SolverSession
-getSession = gets cssSession
 
 --- Get SMTInfo object
 getSMTInfo :: CSM SMTInfo
@@ -203,15 +211,9 @@ csearch opts fs v smtInfo e = do
   -- prepare main expression for concolic search
   let (sub, e', v') = norm v e
       ceState       = initCEState opts sub fs v'
-  -- initialize solver session
-  status opts "Initializing solver session"
-  session <- initSession z3 (smtDecls smtInfo)
-  s       <- execCSM (searchLoop sub ceState e')
-                     (initCSState opts smtInfo session (dom sub))
-  -- terminate solver session
-  termSession (cssSession s)
-  -- dump file with SMT-LIB commands
-  dumpSMT opts $ showSMT $ trace $ cssSession s
+  s <- evalSessions z3 defSMTOpts { globalCmds = smtDecls smtInfo } $
+         execCSM (searchLoop sub ceState e')
+                 (initCSState opts smtInfo (dom sub))
   return (cssTests s)
 
 searchLoop :: AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
@@ -219,7 +221,7 @@ searchLoop = searchLoopN 10
 
 --- main loop of concolic search
 searchLoopN :: Int -> AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
-searchLoopN d sub ceState e
+searchLoopN d phi ceState e
   | d == 0    = return ()
   | otherwise = do
   opts <- getOpts
@@ -228,7 +230,7 @@ searchLoopN d sub ceState e
   -- in non-deterministic branches
   (rs, ts, v') <- renameTraces (ceval e ceState)
   -- TODO: Simplify conversion
-  let tcase = (fmap fst3 (subst sub e), map (fmap fst3) rs)
+  let tcase = (fmap fst3 (subst phi e), map (fmap fst3) rs)
   io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
   addTestCase tcase
   io $ debugSearch opts $
@@ -237,24 +239,23 @@ searchLoopN d sub ceState e
 --   prepSearch tcase ts
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (pretty st)
-  uv <- getCoverMap
+--   uv <- getCoverMap
 --   io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
   nxt <- nextSymNode
   case nxt of
     Nothing -> return ()
     Just  n -> do
       io $ debugSearch opts $ "Next node: " ++ show n
-      cmds    <- genSMTCmds v' n
-      msub    <- solve (getSMTArgs n sub) cmds
-      case msub of
-        Nothing   -> return () -- instead of complete abort, drop node and continue search?
-        Just bdgs -> do
-          let sub'     = sub `compose` bdgs
-              ceState' = ceState { cesFresh = v'
-                                 , cesHeap  = fromSubst opts sub'
-                                 }
-          unlessM (optIncremental opts) (csm (restartSession z3))
-          searchLoopN (d-1) sub' ceState' e
+      cmds <- genSMTCmds v' n
+      let is = getSMTArgs n phi
+      answer <- liftSMTSess $ solveSMTVars (map tvar is) cmds
+      case answer of
+        Left errs -> io $ putStrLn $ pPrint $ hsep $ map pretty errs
+        Right vps -> do
+          smtInfo <- getSMTInfo
+          let sigma = mkSubst is $ zipWith (fromTerm smtInfo) is (map snd vps)
+              theta = phi `compose` sigma
+          searchLoopN (d-1) theta ceState { cesFresh = v', cesHeap = fromSubst opts theta } e
 
 --- Renaming of trace variables
 renameTraces :: ([AExpr TypeAnn], [Trace], VarIndex)
@@ -302,40 +303,6 @@ genSMTCmds v (SymNode _ ctxt cidcs pcs _ dv) = do
              CConstr constr -> [tneg (constr (tvar dv))]
   return $ declConsts smtInfo cidcs ++ [assert (pcs ++ pc)]
 
---- Select subset of argument variables of concolically tested expression
+--- Get variable indices for arguments of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]
 getSMTArgs (SymNode _ _ _ _ vs v) = dom . restrict (v:vs)
-
---- Compute bindings for the arguments of the concolically tested expression
---- in form of a substitution by running an SMT solver
-solve :: [VarIndex] -> [Command] -> CSM (Maybe AExpSubst)
-solve vs cmds = do
-  opts    <- getOpts
-  smtInfo <- getSMTInfo
-  -- remove constraints from previous iteration
-  whenM (optIncremental opts) (csm resetStack)
-  -- add constraints to solver stack
-  csm $ sendCmds cmds
-  io  $ debugSearch opts $ "SMT-LIB model:\n" ++ showSMT cmds
-  -- check satisfiability
-  isSat <- csm checkSat
-  io $ debugSearch opts $ "Check satisfiability: " ++ pPrint (pretty isSat)
-  case isSat of
-    Sat -> do
-      vals <- csm $ getValues (map tvar vs)
-      io $ debugSearch opts $ "Get values: " ++ pPrint (pretty vals)
-      case vals of
-        Values vps -> return $ Just $ mkSubst vs $
-                        zipWith (fromTerm smtInfo) vs (map snd vps)
-        _          -> return Nothing
-    _   -> return Nothing
-
--- helper
-
---- Lift an SMT solver operation to CSM
-csm :: SMTOp a -> CSM a
-csm computation = do
-  s              <- get
-  (res, session) <- io $ computation (cssSession s)
-  put s { cssSession = session }
-  return res
