@@ -11,7 +11,7 @@ import List (delete, intersect, union)
 
 import Text.Pretty hiding          (compose)
 
-import CCTOptions (CCTOpts (..))
+import CCTOptions (CCTOpts (..), covScope)
 
 import Data.PQ (PQ)
 
@@ -156,12 +156,12 @@ type UpdSymInfo = SymTree -> CoverMap -> SMTInfo -> (SymTree, CoverMap, SMTInfo)
 
 updSymInfo :: Trace -> CSM ()
 updSymInfo t = modify $ \s ->
-  let (st, uvn, te) = processTrace t (cssTree s) (cssCoverMap s) (cssSMTInfo s)
+  let (st, uvn, te) = processTrace (cssCCTOpts s) t (cssTree s) (cssCoverMap s) (cssSMTInfo s)
   in s { cssSMTInfo = te, cssTree = st, cssCoverMap = uvn }
 
-processTrace :: Trace -> UpdSymInfo
-processTrace trace tree uvNodes smtInfo
-  = prcTrace trace 0 [] [] [] [] 1 tree uvNodes smtInfo
+processTrace :: CCTOpts -> Trace -> UpdSymInfo
+processTrace opts trace tree uvNodes smtInfo
+  = prcTrace trace 0 [] [] [] [] (covScope opts) tree uvNodes smtInfo
  where
   prcTrace []                                  _ _     _  _  _    _  st uvn smtEnv = (st, uvn, smtEnv)
   prcTrace (Decision cid bnr v sobj args : ds) d cidcs cs vs ctxt cl st uvn smtEnv =

@@ -2,10 +2,12 @@
 --- Command line options for the concolic testing tool.
 ---
 --- @author  Jan Tikovsky
---- @version October 2017
+--- @version November 2017
 --- --------------------------------------------------------------------------
 module CCTOptions
-  (CCTOpts (..), Strategy (..), Verbosity (..), badUsage, defCCTOpts, getOpts) where
+  ( CCTOpts (..), Strategy (..), Verbosity (..), badUsage, covScope
+  , defCCTOpts, getOpts
+  ) where
 
 import FilePath (splitSearchPath)
 import GetOpt   ( OptDescr (..), ArgOrder (Permute), ArgDescr (..), getOpt
@@ -29,6 +31,7 @@ data CCTOpts = CCTOpts
   , optStrategy    :: Strategy
   , optSearchDepth :: Int
   , optEvalSteps   :: Int
+  , optCoverage    :: Coverage
   }
 
 --- default options
@@ -45,6 +48,7 @@ defCCTOpts = CCTOpts
   , optStrategy    = DFS
   , optSearchDepth = 10
   , optEvalSteps   = 500
+  , optCoverage    = BranchCov
   }
 
 --- Verbosity level
@@ -53,6 +57,14 @@ data Verbosity = Quiet | Status | Info | Debug
 
 --- Search strategies
 data Strategy = Narrowing | DFS
+
+--- Determine coverage scope
+covScope :: CCTOpts -> Int
+covScope opts = if optCoverage opts == BranchCov then 1 else 2
+
+--- coverage criterion
+data Coverage = BranchCov | FunctionCov
+  deriving Eq
 
 --- Description and flag of verbosities
 verbosities :: [(Verbosity, String, String)]
@@ -66,6 +78,12 @@ verbosities = [ (Quiet , "0", "quiet"       )
 strategies :: [(Strategy, String, String)]
 strategies = [ (Narrowing, "narrow", "use narrowing for test case generation")
              , (DFS      , "dfs"   , "primitive depth first search")
+             ]
+
+--- Description and flag of coverage criterions
+coverages :: [(Coverage, String, String)]
+coverages = [  (BranchCov  , "branches"  , "use branch coverage (default)")
+             , (FunctionCov, "functions" , "use function coverage")
              ]
 
 --- version information of ccti
@@ -101,6 +119,7 @@ options =
       "search for imports in `dir[:dir]'"
   , mkOption ['v'] ["verbosity"] verbDescriptions  "n" "verbosity level"
   , mkOption []    ["strat"]     stratDescriptions "s" "search strategy"
+  , mkOption ['c'] ["cover"]     coverDescriptions "c" "coverage criterion"
   , Option ['d'] ["search-depth"]
       (ReqArg (onOptsArg $ \arg opts -> opts { optSearchDepth = read arg }) "n")
       "maximal search depth"
@@ -122,6 +141,13 @@ stratDescriptions = map toDescr strategies
   where
   toDescr (flag, name, desc) = (name, desc, set flag)
   set f opts = opts { optStrategy = f }
+
+--- Coverage descriptions
+coverDescriptions :: OptTable CCTOpts
+coverDescriptions = map toDescr coverages
+  where
+  toDescr (flag, name, desc) = (name, desc, set flag)
+  set f opts = opts { optCoverage = f }
 
 --- Retrieve the parsed options. This operation only returns if
 ---  * the @--help@ option was not specified
