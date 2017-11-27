@@ -16,8 +16,6 @@ all:
 # Build ccti with all its dependencies
 .PHONY: build
 build:
-	$(CPM) link $(LOCALPKGS)/flatcurry-2.0.0           # Remove as soon as flatcurry packages were updated (pretty dependency)
-	$(CPM) link $(LOCALPKGS)/flatcurry-annotated-2.0.0
 	$(CPM) install                                     # Install package dependencies
 	$(CPM) curry :l src/ccti.curry :save :q
 
