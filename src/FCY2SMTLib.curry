@@ -244,8 +244,8 @@ ty2SMT :: TypeExpr -> SMTTrans SMT.Sort
 ty2SMT (ForallType       _ _) = error "FCY2SMT.ty2SMT: ForallType"
 ty2SMT (TVar               v) = return $ SMT.SComb (typeVars !! v) []
 ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
-ty2SMT (TCons qn@(_, tc) _) =
-  return $ SMT.SComb (lookupWithDefaultBM tc qn predefTypes) [] -- <$> mapM ty2SMT tys
+ty2SMT (TCons qn@(_, tc) tys) =
+  SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
 
 --- Transform a FlatCurry constructor or literal to SMT-LIB
 cons2SMT :: SMTInfo -> SymObj -> VarIndex -> SMT.QIdent
