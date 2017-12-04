@@ -2,7 +2,7 @@
 --- This module defines some auxiliary functions for intermediate output.
 ---
 --- @author  Jan Tikovsky
---- @version June 2017
+--- @version December 2017
 --- ----------------------------------------------------------------------------
 module Output where
 
@@ -15,6 +15,9 @@ traceEval opts msg x = unsafePerformIO (debugEval opts msg >> return x)
 
 traceInfo :: CCTOpts -> String -> a -> a
 traceInfo opts msg x = unsafePerformIO (info opts msg >> return x)
+
+traceStatus :: CCTOpts -> String -> a -> a
+traceStatus opts msg x = unsafePerformIO (status opts msg >> return x)
 
 --- Print status information
 status :: CCTOpts -> String -> IO ()

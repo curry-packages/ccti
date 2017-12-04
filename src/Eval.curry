@@ -3,7 +3,7 @@
 --- (head) normal form based on the natural semantics.
 ---
 --- @author  Jan Tikovsky
---- @version October 2017
+--- @version December 2017
 --- ----------------------------------------------------------------------------
 module Eval where
 
@@ -11,16 +11,18 @@ module Eval where
 import FiniteMap (filterFM, maxFM)
 
 import FlatCurry.Annotated.Goodies hiding (range)
-import FlatCurry.Annotated.Pretty  (ppExp)
+import FlatCurry.Annotated.Pretty         (ppExp)
 import FlatCurry.Annotated.Types
-import List                        ((\\), find, intersect, nub)
+
+import List ((\\), find, intersect, nub)
+
 import Text.Pretty hiding (combine)
 
-import CCTOptions                  (CCTOpts (..), Strategy (..))
+import CCTOptions          (CCTOpts (..), Strategy (..))
 import FCYFunctorInstances
 import FlatCurryGoodies
 import Heap
-import Output                      (traceEval, traceInfo)
+import Output              (traceEval, traceInfo, traceStatus)
 import Substitution
 import Symbolic
 import Utils
@@ -30,18 +32,29 @@ import Debug
 infixl 3 <|>
 
 -- -----------------------------------------------------------------------------
--- Concolic evaluation monad
+-- Concolic evaluation monad transformer
 -- -----------------------------------------------------------------------------
 
---- Non-Deterministic state monad.
-type State s a = s -> Result (a, s)
-
---- Non-Deterministic result
+--- Monad for non-deterministic results
 --- @cons Return - single result
 --- @cons Choice - non-deterministic choice
 data Result a
   = Return a
   | Choice (Result a) (Result a)
+
+instance Monad Result where
+  return = Return
+
+  m >>= f = case m of Return x   -> f x
+                      Choice l r -> Choice (l >>= f) (r >>= f)
+
+--- Concolic evaluation monad
+data CEM a = CE { runCEM :: CEState -> Result (a, CEState) }
+
+instance Monad CEM where
+  return x = CE $ \s -> return (x, s)
+
+  f >>= g = CE $ \s -> runCEM f s >>= \(x, s') -> runCEM (g x) s'
 
 --- Internal state for concolic evaluation, consisting of
 ---   * the current ccti options,
@@ -78,6 +91,26 @@ initCEState opts sub fs v = CEState
   , cesLConstr   = Nothing
   }
 
+--- Combine two evaluations within a choice
+choice :: CEM a -> CEM a -> CEM a
+choice x y = CE $ \s -> Choice (runCEM x s) (runCEM y s)
+
+--- Infix version of non-deterministic choice.
+(<|>) :: CEM a -> CEM a -> CEM a
+(<|>) = choice
+
+gets :: (CEState -> a) -> CEM a
+gets f = CE $ \s -> Return (f s, s)
+
+get :: CEM CEState
+get = gets id
+
+put :: CEState -> CEM ()
+put s = CE $ \_ -> Return ((), s)
+
+modify :: (CEState -> CEState) -> CEM ()
+modify f = CE $ \s -> Return ((), f s)
+
 --- Generate a Heap from a given Substitution
 fromSubst :: CCTOpts -> AExpSubst -> Heap
 fromSubst opts sub = fromListH $ zip (dom sub) $ case optStrategy opts of
@@ -98,44 +131,12 @@ traceStep ruleName e x = do
                    , text "Symbolic Trace:"  <+> listSpaced (map pretty t)
                    , text "Expression:"      <+> ppExp e
                    ])
-    (if optEvalSteps opts - s < 0 then traceInfo opts msg (return e) else x)
+    (if optEvalSteps opts - s < 0 then traceStatus opts msg (return e) else x)
  where msg = "Maximum number of evaluation steps exceeded. Aborting evaluation."
 
 traceSym :: CEState -> a -> a
 traceSym s = traceInfo (cesCCTOpts s)
   (pPrint $ text "Symbolic Trace:" <+> listSpaced (map pretty (reverse (cesTrace s))))
-
---- Concolic evaluation monad
-data CEM a = CE { runCEM :: CEState -> Result (a, CEState) }
-
---- Monadic bind operation.
-bindResult :: Result a -> (a -> Result b) -> Result b
-bindResult (Return   x) f = f x
-bindResult (Choice a b) f = Choice (bindResult a f) (bindResult b f)
-
-instance Monad CEM where
-  return x = CE $ \s -> Return (x, s)
-
-  f >>= g = CE $ \s -> bindResult (runCEM f s) (\(x, s') -> runCEM (g x) s')
-
-choice :: CEM a -> CEM a -> CEM a
-choice x y = CE $ \s -> Choice (runCEM x s) (runCEM y s)
-
-gets :: (CEState -> a) -> CEM a
-gets f = CE $ \s -> Return (f s, s)
-
-get :: CEM CEState
-get = gets id
-
-put :: CEState -> CEM ()
-put s = CE $ \_ -> Return ((), s)
-
-modify :: (CEState -> CEState) -> CEM ()
-modify f = CE $ \s -> Return ((), f s)
-
---- Infix version of non-deterministic choice.
-(<|>) :: CEM a -> CEM a -> CEM a
-(<|>) = choice
 
 --- ----------------------------------------------------------------------------
 
