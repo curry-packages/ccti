@@ -85,7 +85,7 @@ fromSubst opts sub = fromListH $ zip (dom sub) $ case optStrategy opts of
   Narrowing -> repeat FreeVar
 
 --- Trace a single evaluation step
-traceStep :: String -> AExpr TypeAnn -> CEM a -> CEM a
+traceStep :: String -> AExpr TypeAnn -> CEM (AExpr TypeAnn) -> CEM (AExpr TypeAnn)
 traceStep ruleName e x = do
   opts <- getOpts
   h    <- getHeap
@@ -98,9 +98,8 @@ traceStep ruleName e x = do
                    , text "Symbolic Trace:"  <+> listSpaced (map pretty t)
                    , text "Expression:"      <+> ppExp e
                    ])
-    (if optEvalSteps opts - s + 1 == 0
-       then error "Maximum number of evaluation steps exceeded"
-       else x)
+    (if optEvalSteps opts - s < 0 then traceInfo opts msg (return e) else x)
+ where msg = "Maximum number of evaluation steps exceeded. Aborting evaluation."
 
 traceSym :: CEState -> a -> a
 traceSym s = traceInfo (cesCCTOpts s)
@@ -350,14 +349,14 @@ nf e = hnf e >>= \e' -> case e' of
 --- Evaluate given FlatCurry expression to head normal form
 hnf :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 hnf exp = case exp of
-  AVar        ty v -> traceStep "Var" exp $ hnfVar  ty v
-  ALit        ty l -> traceStep "Lit" exp $ hnfLit  ty l
-  AComb ty ct f es -> traceStep "Comb" exp $ hnfComb ty ct f es
-  ALet      _ bs e -> traceStep "Let" exp $ hnfLet  bs e
-  AFree     _ vs e -> traceStep "Free" exp $ hnfFree vs e
-  AOr      _ e1 e2 -> traceStep "Or" exp $ hnfOr   e1 e2
+  AVar        ty v  -> traceStep "Var"  exp $ hnfVar  ty v
+  ALit        ty l  -> traceStep "Lit"  exp $ hnfLit  ty l
+  AComb ty ct f es  -> traceStep "Comb" exp $ hnfComb ty ct f es
+  ALet      _ bs e  -> traceStep "Let"  exp $ hnfLet  bs e
+  AFree     _ vs e  -> traceStep "Free" exp $ hnfFree vs e
+  AOr      _ e1 e2  -> traceStep "Or"   exp $ hnfOr   e1 e2
   ACase ann ct e bs -> traceStep "Case" exp $ hnfCase ann ct e bs
-  ATyped     _ e _ -> hnf     e
+  ATyped      _ e _ -> hnf e
 
 --- Concolic evaluation of a variable
 hnfVar :: TypeAnn -> VarIndex -> CEM (AExpr TypeAnn)
