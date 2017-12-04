@@ -1,3 +1,9 @@
+--- ----------------------------------------------------------------------------
+--- This module includes the main search loop of the ccti.
+---
+--- @author  Jan Tikovsky
+--- @version December 2017
+--- ----------------------------------------------------------------------------
 module Search where
 
 import FiniteMap ( FM, addListToFM, addToFM_C, delFromFM, elemFM, emptyFM
@@ -27,9 +33,7 @@ import Search.CaseMap
 import Search.Queue
 
 import Solver.SMTLIB.Z3 ( SMTOpts (..), SMTSess, defSMTOpts, evalSessions
-                        , solveSMTVars, z3)
--- only needed for lifting of IO actions
-import Solver.SMTLIB.Internal.Interaction (liftIOA, liftSMT)
+                        , liftIOA, solveSMTVars, z3)
 
 import Substitution (AExpSubst, compose, dom, mkSubst, restrict, subst)
 import Symbolic
@@ -101,7 +105,7 @@ liftSMTSess sess = CS $ \s -> sess >>= \x -> return (x, s)
 
 --- Lift IO actions to CSM
 io :: IO a -> CSM a
-io = liftSMTSess . liftSMT . liftIOA
+io = liftSMTSess . liftIOA
 
 --------------------------------------------------------------------------------
 
