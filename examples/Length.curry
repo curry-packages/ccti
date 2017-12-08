@@ -16,7 +16,6 @@ lengthGen :: Peano -> [Bool]
 lengthGen n | lengthP xs `eqP` n = xs
             | otherwise          = [True,False,False]
   where xs free
--- lengthGen n = let xs free in if lengthP xs `eqP` n then xs else [True,True,False]
 
 -- Does not terminate, because interpreter guesses lists of any length
 lengthInt :: Int -> [Bool]
@@ -24,4 +23,5 @@ lengthInt n | length xs == n = xs
             | otherwise      = [True,False,False]
   where xs free
 
+main :: [Bool]
 main = lengthGen Z

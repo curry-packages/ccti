@@ -1,3 +1,5 @@
+module BST where
+
 data SearchTree = Empty | Node Int SearchTree SearchTree
   deriving (Eq, Show)
 
@@ -44,4 +46,5 @@ isBST low high t = case t of
     && isBST low high l
     && isBST low high r
 
-main = insert 1 Empty
+main :: SearchTree
+main = mirror Empty

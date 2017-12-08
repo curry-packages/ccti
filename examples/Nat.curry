@@ -1,6 +1,9 @@
+module Nat where
+
 data Nat = IHi
          | O Nat
          | I Nat
+ deriving Eq
 
 add :: Nat -> Nat -> Nat
 add IHi   y     = succ y
@@ -16,4 +19,5 @@ succ IHi   = O IHi
 succ (O x) = I x
 succ (I x) = O (succ x)
 
+main :: Nat
 main = add IHi (I (O IHi))
