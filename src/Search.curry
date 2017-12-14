@@ -32,8 +32,8 @@ import Language.SMTLIB
 import Search.CaseMap
 import Search.Queue
 
-import Solver.SMTLIB.Z3 ( SMTOpts (..), SMTSess, defSMTOpts, evalSessions
-                        , liftIOA, solveSMTVars, z3)
+import Solver.SMTLIB.Z3 ( SMTError (..), SMTOpts (..), SMTSess, defSMTOpts
+                        , evalSessions, liftIOA, solveSMTVars, z3)
 
 import Substitution (AExpSubst, compose, dom, mkSubst, restrict, subst)
 import Symbolic
@@ -49,6 +49,9 @@ type SymTree = PQ Depth SymNode
 --- non-deterministic results
 type TestCase = (AExpr TypeExpr, [AExpr TypeExpr])
 
+--- Information on SMT solver failures
+data SMTFail = SMTFail [SMTError] [VarIndex] [Command]
+
 --- Pretty printing of test cases
 ppTestCase :: (AExpr TypeExpr, [AExpr TypeExpr]) -> Doc
 ppTestCase (e, res) = parens (ppExp e <+> equals <+> set (map ppExp res))
@@ -60,6 +63,7 @@ data CSState = CSState
   , cssCoverMap :: CoverMap
   , cssTests    :: [TestCase]
   , cssSymArgs  :: [VarIndex]
+  , cssSMTFails :: [SMTFail]
   }
 
 --- Initial state for the concolic search
@@ -71,6 +75,7 @@ initCSState opts smtInfo sargs = CSState
   , cssCoverMap = emptyCM
   , cssTests    = []
   , cssSymArgs  = sargs
+  , cssSMTFails = []
   }
 
 --------------------------------------------------------------------------------
@@ -135,6 +140,11 @@ getSymArgs = gets cssSymArgs
 --- Add a test case to the current test cases
 addTestCase :: TestCase -> CSM ()
 addTestCase tc = modify $ \s -> s { cssTests = [tc] `union` cssTests s }
+
+--- Add information on SMT solver failure
+addSMTFail :: [SMTError] -> [VarIndex] -> [Command] -> CSM ()
+addSMTFail errs vars cmds =
+  modify $ \s -> s { cssSMTFails = SMTFail errs vars cmds : cssSMTFails s }
 
 --- Get the constructors / constraints already covered for a given context
 getCovered :: Context -> CSM CoveredCs
@@ -222,6 +232,11 @@ csearch opts fs v smtInfo e = do
   s <- evalSessions z3 smtOpts { globalCmds = smtDecls smtInfo } $
          execCSM (searchLoop sub ceState e')
                  (initCSState opts smtInfo (dom sub))
+  let fails = cssSMTFails s
+  unlessM (null fails) $ do
+    putStrLn $ show (length fails) ++ " failure(s) occurred during solving."
+    putStrLn $ "Dumping corresponding SMT-LIB scripts to .smt/smtFail<timestamp>.smt2"
+    writeSMTDump "smtFail" (foldr genSMTFail (smtDecls smtInfo) fails)
   return (cssTests s)
 
 searchLoop :: AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
@@ -247,8 +262,9 @@ searchLoopN d phi ceState e
 --   prepSearch tcase ts
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (pretty st)
---   uv <- getCoverMap
---   io $ debugSearch opts $ "Case Map: " ++ pPrint (ppFM (\(cid,n) -> int cid <+> text (show n)) uv)
+  uv <- getCoverMap
+  io $ debugSearch opts $ "CoverMap: " ++ pPrint
+    (ppFM (\(cid,m) -> ppFM (\(_,n) -> int cid <+>  text (show n)) m) (cm uv))
   nxt <- nextSymNode
   case nxt of
     Nothing -> return ()
@@ -258,7 +274,11 @@ searchLoopN d phi ceState e
       let is = getSMTArgs n phi
       answer <- liftSMTSess $ solveSMTVars (map tvar is) cmds
       case answer of
-        Left errs -> io $ putStrLn $ pPrint $ hsep $ map pretty errs
+        -- collect any SMT solver related failures and continue with search
+        Left errs -> do
+          addSMTFail errs is cmds
+          rmvSymNode
+          searchLoopN (d-1) phi ceState { cesFresh = v', cesHeap = fromSubst opts phi } e
         Right vps -> do
           smtInfo <- getSMTInfo
           let sigma = mkSubst is $ zipWith (fromTerm smtInfo) is (map snd vps)
@@ -307,10 +327,17 @@ genSMTCmds v (SymNode _ ctxt cidcs pcs _ dv) = do
   smtInfo <- getSMTInfo
   ci      <- getCovered ctxt
   let pc = case ci of
-             CCons cons   -> noneOf v dv cons
+             CCons   cons   -> noneOf v dv cons
              CConstr constr -> [tneg (constr (tvar dv))]
   return $ declConsts smtInfo cidcs ++ [assert (pcs ++ pc)]
 
 --- Get variable indices for arguments of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]
 getSMTArgs (SymNode _ _ _ _ vs v) = dom . restrict (v:vs)
+
+--- Generate SMT commands from SMTFails
+genSMTFail :: SMTFail -> [Command] -> [Command]
+genSMTFail (SMTFail errs vs cmds) css = concat
+  [ css, map (comment . show) errs, (Push 1 : cmds)
+  , [CheckSat, GetValue (map tvar vs), Pop 1]
+  ]

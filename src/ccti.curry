@@ -54,6 +54,7 @@ main = do
       testCases <- case optStrategy opts of
 --                      Narrowing -> narrow  opts fs' v e
                      DFS       -> csearch opts fs' v smtInfo e'
+      status opts "Printing generated test cases:"
       putStrLn $ pPrint $ vsep $ map ppTestCase testCases
 
 -- TODO: nicht transformierte Funktionen des Main Moduls werden verwendet,
