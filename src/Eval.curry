@@ -18,7 +18,7 @@ import List ((\\), find, intersect, nub)
 
 import Text.Pretty hiding (combine)
 
-import CCTOptions          (CCTOpts (..), Strategy (..))
+import CCTOptions          (CCTOpts (..))
 import FCYFunctorInstances
 import FlatCurryGoodies
 import Heap
@@ -81,7 +81,7 @@ data CEState = CEState
 initCEState :: CCTOpts -> AExpSubst -> [AFuncDecl TypeAnn] -> VarIndex -> CEState
 initCEState opts sub fs v = CEState
   { cesCCTOpts   = opts
-  , cesHeap      = fromSubst opts sub
+  , cesHeap      = fromSubst sub
   , cesFuncs     = fs
   , cesFresh     = v
   , cesTraceFlag = False
@@ -112,10 +112,8 @@ modify :: (CEState -> CEState) -> CEM ()
 modify f = CE $ \s -> Return ((), f s)
 
 --- Generate a Heap from a given Substitution
-fromSubst :: CCTOpts -> AExpSubst -> Heap
-fromSubst opts sub = fromListH $ zip (dom sub) $ case optStrategy opts of
-  DFS       -> map BoundVar (range sub)
-  Narrowing -> repeat FreeVar
+fromSubst :: AExpSubst -> Heap
+fromSubst sub = fromListH $ zip (dom sub) $ map BoundVar (range sub)
 
 --- Trace a single evaluation step
 traceStep :: String -> AExpr TypeAnn -> CEM (AExpr TypeAnn) -> CEM (AExpr TypeAnn)
@@ -443,7 +441,6 @@ hnfOr e1 e2 = hnf e1 <|> hnf e2
 hnfCase :: TypeAnn -> CaseType -> AExpr TypeAnn -> [ABranchExpr TypeAnn]
         -> CEM (AExpr TypeAnn)
 hnfCase ann ct e bs = do
---   (cid, e')      <- rmvCaseID e
   ve@(AVar _ vi) <- bindArg e -- flattening of scrutinized expression
   -- Evaluate case argument with or without tracing of constraints on literals
   let hnfCaseArg = if hasBoolType e then (withLitTracing . hnf) else hnf
@@ -453,9 +450,11 @@ hnfCase ann ct e bs = do
       Just (_, _,  be) -> hnf be
     AComb ty ConsCall c es -> case findBranch (APattern ty c []) bs of
       Nothing          -> failS ty
-      Just (n, vs, be) -> do
-        mkDecision e cid (BNr n bcnt) vi c (map varNr es)
-        hnf (subst (mkSubst vs es) be)
+      Just (n, vs, be)
+        | all isVar es -> do
+          mkDecision e cid (BNr n bcnt) vi c (map varNr es)
+          hnf (subst (mkSubst vs es) be)
+        | otherwise    -> hnf e
     AComb _ FuncCall _ _
       | v == failedExpr ty -> failS ty
       where ty = annExpr v
@@ -478,7 +477,7 @@ hnfCase ann ct e bs = do
               es'       = zipWith AVar tys ys
           bindE i (AComb ty' ConsCall c es')
           hnf (subst (mkSubst xs es') be)
-    _ -> error $ "Eval.hnfCase: " ++ show v
+    _ -> hnf v
  where
   cid  = cidAnn ann
   bcnt = length bs

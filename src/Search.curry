@@ -278,12 +278,12 @@ searchLoopN d phi ceState e
         Left errs -> do
           addSMTFail errs is cmds
           rmvSymNode
-          searchLoopN (d-1) phi ceState { cesFresh = v', cesHeap = fromSubst opts phi } e
+          searchLoopN (d-1) phi ceState { cesFresh = v', cesHeap = fromSubst phi } e
         Right vps -> do
           smtInfo <- getSMTInfo
           let sigma = mkSubst is $ zipWith (fromTerm smtInfo) is (map snd vps)
               theta = phi `compose` sigma
-          searchLoopN (d-1) theta ceState { cesFresh = v', cesHeap = fromSubst opts theta } e
+          searchLoopN (d-1) theta ceState { cesFresh = v', cesHeap = fromSubst theta } e
 
 --- Renaming of trace variables
 renameTraces :: ([AExpr TypeAnn], [Trace], VarIndex)

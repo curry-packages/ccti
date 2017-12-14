@@ -18,7 +18,7 @@ import ReadShowTerm               (readUnqualifiedTerm)
 import System                     (exitWith, getProgName)
 import Text.Pretty hiding         ((</>))
 
-import CCTOptions                 (CCTOpts (..), Strategy (..), badUsage, getOpts)
+import CCTOptions                 (CCTOpts (..), badUsage, getOpts)
 import FCYFunctorInstances
 import FCY2SMTLib                 (fcy2SMT)
 import FlatCurryGoodies           (extendAnn, getMainBody)
@@ -51,9 +51,7 @@ main = do
       let smtInfo  = fcy2SMT ts
       debug opts (pPrint $ text "Generated SMTLIB declarations:" <+> pretty smtInfo)
       status opts "Beginning with concolic search"
-      testCases <- case optStrategy opts of
---                      Narrowing -> narrow  opts fs' v e
-                     DFS       -> csearch opts fs' v smtInfo e'
+      testCases <- csearch opts fs' v smtInfo e'
       status opts "Printing generated test cases:"
       putStrLn $ pPrint $ vsep $ map ppTestCase testCases
 
