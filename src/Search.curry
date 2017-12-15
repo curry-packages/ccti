@@ -137,9 +137,18 @@ getSMTInfo = gets cssSMTInfo
 getSymArgs :: CSM [VarIndex]
 getSymArgs = gets cssSymArgs
 
---- Add a test case to the current test cases
-addTestCase :: TestCase -> CSM ()
-addTestCase tc = modify $ \s -> s { cssTests = [tc] `union` cssTests s }
+--- Get current test suite
+getTestCases :: CSM [TestCase]
+getTestCases = gets cssTests
+
+--- Add a test case to the current test suite
+--- Return 'True' if its a new test case and 'False' otherwise
+addTestCase :: TestCase -> CSM Bool
+addTestCase tc = do
+  tcs <- getTestCases
+  if tc `elem` tcs
+    then return False
+    else modify (\s -> s { cssTests = tc : tcs }) >> return True
 
 --- Add information on SMT solver failure
 addSMTFail :: [SMTError] -> [VarIndex] -> [Command] -> CSM ()
@@ -150,23 +159,9 @@ addSMTFail errs vars cmds =
 getCovered :: Context -> CSM CoveredCs
 getCovered ctxt = getCoverMap >>= return . covered ctxt
 
---- Get the number of unvisited nodes
--- numOfUnvis :: CoverMap -> Int
--- numOfUnvis = foldFM (\_ ci acc -> (length (uncovered ci) + acc)) 0
-
 --------------------------------------------------------------------------------
 
 type UpdSymInfo = SymTree -> CoverMap -> SMTInfo -> (SymTree, CoverMap, SMTInfo)
-
---- Prepare next iteration of search
--- prepSearch :: TestCase -> [Trace] -> CSM ()
--- prepSearch tcase ts = do
---   uvn  <- getCoverMap
---   mapM_ updSymInfo ts
---   uvn' <- getCoverMap
---   if numOfUnvis uvn' < numOfUnvis uvn || numOfUnvis uvn == 0
---     then addTestCase tcase
---     else rmvSymNode
 
 updSymInfo :: Trace -> CSM ()
 updSymInfo t = modify $ \s ->
@@ -240,11 +235,11 @@ csearch opts fs v smtInfo e = do
   return (cssTests s)
 
 searchLoop :: AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
-searchLoop = searchLoopN 10
+searchLoop = searchLoopN 20 (return ())
 
 --- main loop of concolic search
-searchLoopN :: Int -> AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
-searchLoopN d phi ceState e
+searchLoopN :: Int -> CSM () -> AExpSubst -> CEState -> AExpr TypeAnn -> CSM ()
+searchLoopN d skipNode phi ceState e
   | d == 0    = return ()
   | otherwise = do
   opts <- getOpts
@@ -255,11 +250,12 @@ searchLoopN d phi ceState e
   -- TODO: Simplify conversion
   let tcase = (fmap fst3 (subst phi e), map (fmap fst3) rs)
   io $ debugSearch opts $ "New test case: " ++ pPrint (ppTestCase tcase)
-  addTestCase tcase
+  isNewTest <- addTestCase tcase
+  -- in case no new test data was generated skip current symbolic node
+  unlessM isNewTest skipNode
   io $ debugSearch opts $
     "Symbolic Traces: " ++ pPrint (listSpaced (map ppTrace ts))
   mapM_ updSymInfo ts
---   prepSearch tcase ts
   st  <- getSymTree
   io $ debugSearch opts $ "Priority Queue: " ++ pPrint (pretty st)
   uv <- getCoverMap
@@ -278,12 +274,12 @@ searchLoopN d phi ceState e
         Left errs -> do
           addSMTFail errs is cmds
           rmvSymNode
-          searchLoopN (d-1) phi ceState { cesFresh = v', cesHeap = fromSubst phi } e
+          searchLoopN (d-1) (skipSymNode n) phi ceState { cesFresh = v', cesHeap = fromSubst phi } e
         Right vps -> do
           smtInfo <- getSMTInfo
           let sigma = mkSubst is $ zipWith (fromTerm smtInfo) is (map snd vps)
               theta = phi `compose` sigma
-          searchLoopN (d-1) theta ceState { cesFresh = v', cesHeap = fromSubst theta } e
+          searchLoopN (d-1) (skipSymNode n) theta ceState { cesFresh = v', cesHeap = fromSubst theta } e
 
 --- Renaming of trace variables
 renameTraces :: ([AExpr TypeAnn], [Trace], VarIndex)
@@ -341,3 +337,9 @@ genSMTFail (SMTFail errs vs cmds) css = concat
   [ css, map (comment . show) errs, (Push 1 : cmds)
   , [CheckSat, GetValue (map tvar vs), Pop 1]
   ]
+
+--- Skip a node in the symbolic execution tree
+--- by marking all its branches as covered
+skipSymNode :: SymNode -> CSM ()
+skipSymNode (SymNode _ ctxt _ _ _ _) =
+  modify $ \s -> s { cssCoverMap = coverAll ctxt (cssCoverMap s) }

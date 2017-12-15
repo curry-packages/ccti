@@ -94,6 +94,12 @@ cover k (BNr m n) cc cm = updateWithCM combInfo k info cm
               error "CaseMap.combInfo: Incompatible coverage info"
       in CoverInfo (u1 `intersect` u2) cc'
 
+--- Cover all branches of a case expression
+coverAll :: (ContextKey k, CaseMap m) => k -> m k CoverInfo -> m k CoverInfo
+coverAll k cm = case lookupCM k cm of
+  Nothing               -> cm
+  Just (CoverInfo _ cc) -> updateCM k (CoverInfo [] cc) cm
+
 -- -----------------------------------------------------------------------------
 -- Case map instances
 -- -----------------------------------------------------------------------------
