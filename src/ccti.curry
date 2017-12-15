@@ -4,6 +4,7 @@ import Distribution               ( FrontendParams, FrontendTarget (TFCY)
                                   , callFrontendWithParams
                                   , rcParams, setFullPath, sysLibPath
                                   )
+import FilePath                   (takeDirectory)
 import FlatCurry.Annotated.Pretty (ppFuncDecls)
 import FlatCurry.Annotated.Types
 import List                       (nub)
@@ -16,8 +17,9 @@ import FCY2SMTLib          (fcy2SMT)
 import FlatCurryGoodies    (extendAnn, getMainBody)
 import IdentifyCases       (idCases)
 import Output              (debug, status)
-import ReadTFCY            (readTFCY)
+import ReadTFCY
 import Search              (csearch, ppTestCase)
+import Utils               (inDirectory)
 
 main :: IO ()
 main = do
@@ -26,13 +28,14 @@ main = do
   params        <- rcParams
   let params' = setFullPath (nub (sysLibPath ++ optImportPaths opts)) params
   status opts "Generating FlatCurry code"
-  callFrontendWithParams TFCY params' (head files)
+  let modpath = head files
+  callFrontendWithParams TFCY params' modpath
   status opts "Reading FlatCurry file(s)"
-  prog@(AProg m _ _ _ _) <- readTFCY (head files)
+  prog@(AProg m _ _ _ _) <- readTFCYFile $ tfcyFile modpath
   case getMainBody prog of
     Nothing -> badUsage exec ["The module must include a main function with a function call in its body."]
     Just  e -> do
-      (ts, fs) <- getTysFuns m
+      (ts, fs) <- inDirectory (takeDirectory modpath) (getTysFuns m)
       status opts "Annotating case expressions with fresh identifiers"
       let (fs', v) = idCases fs
           e'       = fmap extendAnn e

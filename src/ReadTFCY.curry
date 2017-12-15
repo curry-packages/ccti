@@ -4,7 +4,7 @@
 --- @author  Jan Tikovsky
 --- @version December 2017
 --- ----------------------------------------------------------------------------
-module ReadTFCY (readTFCY) where
+module ReadTFCY where
 
 import Directory    (doesFileExist)
 import Distribution ( FrontendParams, FrontendTarget (TFCY), addTarget
@@ -16,6 +16,7 @@ import FileGoodies  (getFileInPath)
 import FilePath     ((<.>), (</>), takeFileName)
 import ReadShowTerm (readUnqualifiedTerm)
 
+import FlatCurry.Annotated.Types
 
 --- Parse a Curry program and return corresponding TypedFlatCurry program
 readTFCY :: String -> IO (AProg TypeExpr)
@@ -44,17 +45,18 @@ tfcyFile prog = inCurrySubdir (stripCurrySuffix prog) <.> "tfcy"
 
 --- Reads a TypedFlatCurry program from a file in ".tfcy" format
 readTFCYFile :: String -> IO (AProg TypeExpr)
-readTFCYFile filename = do
-  exafcy <- doesFileExist filename
+readTFCYFile fn = do
+  exafcy <- doesFileExist fn
   if exafcy
-   then readExistingAFCY filename
-   else do let subdirfilename = inCurrySubdir filename
+   then readExistingTFCY fn
+   else do let subdirfilename = inCurrySubdir fn
            exdirfcy <- doesFileExist subdirfilename
            if exdirfcy
-            then readExistingAFCY subdirfilename
-            else error ("EXISTENCE ERROR: FlatCurry file '" ++ filename ++
+            then readExistingTFCY subdirfilename
+            else error ("EXISTENCE ERROR: TypedFlatCurry file '" ++ fn ++
                         "' does not exist")
  where
-   readExistingAFCY fname = do
-     filecontents <- readFile fname
-     return (readUnqualifiedTerm ["FlatCurry.Types","FlatCurry.Annotated.Types","Prelude"] filecontents)
+ readExistingTFCY fname = do
+   filecontents <- readFile fname
+   return $ readUnqualifiedTerm
+     ["FlatCurry.Types","FlatCurry.Annotated.Types","Prelude"] filecontents

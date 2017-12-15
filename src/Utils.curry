@@ -1,12 +1,14 @@
 --- ----------------------------------------------------------------------------
 --- This module provides some utility operations.
 ---
---- @author  Björn Peemöller, Jan Tikovsky
---- @version October 2017
+--- @author  Jan Tikovsky
+--- @version December 2017
 --- ----------------------------------------------------------------------------
 module Utils where
 
+import Directory (getCurrentDirectory, setCurrentDirectory)
 import FiniteMap
+
 import Text.Pretty
 
 -- some useful combinators for monads
@@ -68,6 +70,16 @@ zip3 xs ys zs = case xs of
 --- Pretty print finite map
 ppFM :: ((a, b) -> Doc) -> FM a b -> Doc
 ppFM ppEntry fm = listSpaced $ map ppEntry $ fmToList fm
+
+--- Perform an IO action in the given directory and return to the previous
+--- directory afterwards
+inDirectory :: String -> IO a -> IO a
+inDirectory dir action = do
+  prevDir <- getCurrentDirectory
+  setCurrentDirectory dir
+  r <- action
+  setCurrentDirectory prevDir
+  return r
 
 -- -----------------------------------------------------------------------------
 -- Tuple utilities
