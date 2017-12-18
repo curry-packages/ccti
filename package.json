@@ -20,5 +20,9 @@
   "executable": {
     "name": "ccti",
     "main": "ccti"
+  },
+  "source": {
+    "git": "https://git.informatik.uni-kiel.de/jrt/ccti.git",
+    "tag": "$version"
   }
 }
