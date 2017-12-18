@@ -6,7 +6,7 @@
   "category": [ "Programming" ],
   "license": "BSD-3-Clause",
   "licenseFile": "LICENSE",
-  "description": "This package provides a tool for the automatic generation of test cases via concolic testing.",
+  "description": "This package provides a tool for the automatic generation of test cases for Curry programs via concolic testing.",
   "dependencies": {
       "flatcurry":           ">= 2.0.0",
       "flatcurry-annotated": ">= 2.0.0",
@@ -15,7 +15,10 @@
       "smtlib-solver":       ">= 0.0.1"
   },
   "compilerCompatibility": {
-        "pakcs": ">= 2.0.0",
-        "kics2": ">= 2.0.0"
-    }
+        "pakcs": ">= 2.0.0"
+    },
+  "executable": {
+    "name": "ccti",
+    "main": "ccti"
+  }
 }

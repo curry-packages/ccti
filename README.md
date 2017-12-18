@@ -8,9 +8,15 @@ of test cases for the functional logic language
 To learn more about Curry take a look at the
 [Curry report](http://www-ps.informatik.uni-kiel.de/currywiki/_media/documentation/report.pdf).
 
-# Installation
+## News
 
-## Installation of z3
+`18.12.2017:` A first release of a Curry package including a prototype version
+of *ccti* is now available. You can install it using the
+[Curry Package Manager](http://www-ps.informatik.uni-kiel.de/currywiki/tools/cpm).
+
+## Installation
+
+### Installation of z3
 
 *ccti* makes use of the [*z3* SMT solver](https://github.com/Z3Prover/z3).
 Since *ccti* uses version 2.6 of the
@@ -31,7 +37,7 @@ make install
 After having installed *z3* please make sure that you add the *z3* binary to
 your path.
 
-## Installation of PAKCS (Version 2)
+### Installation of PAKCS (Version 2)
 
 In order to install *ccti* you need the *PAKCS* Curry compiler (with type classes).
 You can either download the development release
@@ -49,34 +55,35 @@ For Ubuntu/Debian systems there are also DEB packages of *PAKCS*.
 [Here](https://packages.ps.informatik.uni-kiel.de/curry/index.html) you can
 find out how to install them.
 
-## Installation of *ccti*
+### Installation of *ccti*
 
-After *PAKCS* has been successfully installed, you can install *ccti*.
-If you haven't already done this, first checkout the latest version from the
-git repository:
-
-`git clone https://git.informatik.uni-kiel.de/jrt/ccti.git`
-
+After *PAKCS* has been successfully installed, you can install *ccti* via the
+[Curry Package Manager (*CPM*)](http://www-ps.informatik.uni-kiel.de/currywiki/tools/cpm).
 In order to build *ccti* please make sure that the binary of the Curry Package
 Manager is in your path, e.g. by executing `cypm --help`.
-The Curry Package Manager is required to install some of the dependencies of
-*ccti*. You can learn more about the package manager itself
-[here](http://www-ps.informatik.uni-kiel.de/currywiki/tools/cpm).
 
-To build *ccti* change into the corresponding directory, e.g. `cd $HOME/ccti`
-and execute `make install`.
+First, you should initialize/update your local package index using the command
+`cypm update`.
+Afterwards you can install *ccti* by executing `cypm install ccti`.
+The *ccti* binary will be installed to `$HOME/.cpm/bin`.
+
+Alternatively, you can check out the *ccti* package with `cypm checkout ccti`,
+change into the corresponding directory, e.g. `cd $HOME/ccti` and install
+*ccti* via the Makefile provided in the package by executing `make install`.
 Afterwards you will find the binary of *ccti* in the `bin` folder.
 In order to make it globally accessible you should add `$HOME/ccti/bin` to your
 path.
 
-# Removing *ccti*
+## Removing *ccti*
 
-To remove *ccti* simply remove the `ccti` folder, e.g. assuming you installed
+To remove *ccti* simply execute `cypm uninstall ccti`.
+In case you checked out the package and installed  *ccti* locally you can
+simply remove the `ccti` folder, e.g. assuming you installed
 it in your `$HOME` directory:
 
 `rm -rf $HOME/ccti`
 
-# Usage of *ccti*
+## Usage of *ccti*
 
 In order to apply *ccti* for the automated generation of test cases for a Curry
 function you need to call its binary with Curry module.
@@ -143,9 +150,10 @@ Beginning with concolic search
 ~~~
 
 You can find the `Nat` example as well as some other simple examples in the
-`examples` folder of your *ccti* installation.
+`examples` folder of the *ccti* package which you can checkout via *CPM* by
+`cypm checkout ccti`.
 
-## Options for *ccti*
+### Options for *ccti*
 
 There are several options for *ccti*. You get an overview by executing
 `ccti --help`.
