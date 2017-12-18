@@ -5,7 +5,7 @@ import           List            (intersect, union)
 
 import Language.SMTLIB.Goodies   (tvar)
 import Language.SMTLIB.Types     (QIdent, Sort, Term)
-import Symbolic                  (BranchNr (..))
+import Symbolic                  (BranchNr (..), CoverInfo (..), CoveredCs (..))
 
 --- A context key is a sequence of keys consisting of
 --- a primary key and context keys
@@ -48,23 +48,6 @@ class CaseMap m where
 -- Case map implementations
 -- -----------------------------------------------------------------------------
 
---- Coverage information for case expressions
----   * ids of uncovered branches
----   * information on already covered constructors / literal constraints
-data CoverInfo = CoverInfo
-  { uncovered :: [Int]
-  , coveredCs :: CoveredCs
-  }
-  deriving Show
-
---- Covered construtors / literal constraints
-data CoveredCs = CCons   [(QIdent, [Sort])]
-               | CConstr (Term -> Term)
-
-instance Show CoveredCs where
-  show (CCons   c) = show c
-  show (CConstr c) = show (c (tvar 0))
-
 --- Check if all branches of a case expression are covered
 isCovered :: (ContextKey k, Show k, CaseMap m) => k -> m k CoverInfo -> Bool
 isCovered k cm = case lookupCM k cm of
@@ -88,8 +71,8 @@ cover k (BNr m n) cc cm = updateWithCM combInfo k info cm
   combInfo :: CoverInfo -> CoverInfo -> CoverInfo
   combInfo (CoverInfo u1 cc1) (CoverInfo u2 cc2)
     = let cc' = case (cc1, cc2) of
-            (CCons   c1, CCons   c2) -> CCons (c1 `union` c2)
-            (CConstr c1, CConstr  _) -> CConstr c1
+            (CCons      cs1, CCons   cs2) -> CCons (cs1 `union` cs2)
+            (CConstr lc1 l1, CConstr _ _) -> CConstr lc1 l1
             _                      ->
               error "CaseMap.combInfo: Incompatible coverage info"
       in CoverInfo (u1 `intersect` u2) cc'

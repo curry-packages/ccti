@@ -185,34 +185,24 @@ processTrace opts trace tree uvNodes smtInfo
         st'     = enqueueSQ d (SymNode d ctxt' cidcs' cs vs v) st
         -- updated type environment
         smtEnv' = execSMTTrans (updTypeEnv (v:args) (soType sobj) args) smtEnv
-        -- generate constraint information
-        ci      = genCsInfo smtEnv' sobj v args
         -- extended list of path constraints
-        cs'     = cs ++ [genPConstr ci v args]
+        cs'     = cs ++ [(v, sobj, args)]
         -- cover traced branch
-        uvn'    = cover ctxt' bnr ci uvn
+        uvn'    = cover ctxt' bnr (mkCoveredCs sobj args) uvn
     in prcTrace ds (d+1) cidcs' cs' vs' ctxt' cl st' uvn' smtEnv'
 
 --- Generate constraint information
-genCsInfo :: SMTInfo -> SymObj -> VarIndex -> [VarIndex] -> CoveredCs
-genCsInfo smtInfo sobj v args = case sobj of
-  SymCons  _ _ -> CCons [(cons2SMT smtInfo sobj v, map (flip getSMTSort smtInfo) args)]
-  SymLit lcs l -> CConstr (\x -> (lcs2SMT lcs) x (lit2SMT l))
-
-lcs2SMT :: LConstr -> Term -> Term -> Term
-lcs2SMT E  = (=%)
-lcs2SMT NE = (/=%)
-lcs2SMT L  = (<%)
-lcs2SMT LE = (<=%)
-lcs2SMT G  = (>%)
-lcs2SMT GE = (>=%)
+-- genCsInfo :: SMTInfo -> SymObj -> VarIndex -> [VarIndex] -> CoveredCs
+-- genCsInfo smtInfo sobj v args = case sobj of
+--   SymCons  _ _ -> CCons [(cons2SMT smtInfo sobj v, map (flip getSMTSort smtInfo) args)]
+--   SymLit lcs l -> CConstr (\x -> (lcs2SMT lcs) x (lit2SMT l))
 
 --- Generate a path constraint
-genPConstr :: CoveredCs -> VarIndex -> [VarIndex] -> Term
-genPConstr (CCons cons) v args = case cons of
-  [(qi, _)] -> tvar v =% qtcomb qi (map tvar args)
-  _         -> error $ "Search.genPConstr: Invalid constraint info"
-genPConstr (CConstr constr) v _    = constr (tvar v)
+-- genPConstr :: CoveredCs -> VarIndex -> [VarIndex] -> Term
+-- genPConstr (CCons cons) v args = case cons of
+--   [(qi, _)] -> tvar v =% qtcomb qi (map tvar args)
+--   _         -> error $ "Search.genPConstr: Invalid constraint info"
+-- genPConstr (CConstr constr) v _    = constr (tvar v)
 
 csearch :: CCTOpts -> [AFuncDecl TypeAnn] -> VarIndex -> SMTInfo
         -> AExpr TypeAnn -> IO [TestCase]
@@ -322,10 +312,10 @@ genSMTCmds :: VarIndex -> SymNode -> CSM [Command]
 genSMTCmds v (SymNode _ ctxt cidcs pcs _ dv) = do
   smtInfo <- getSMTInfo
   ci      <- getCovered ctxt
-  let pc = case ci of
-             CCons   cons   -> noneOf v dv cons
-             CConstr constr -> [tneg (constr (tvar dv))]
-  return $ declConsts smtInfo cidcs ++ [assert (pcs ++ pc)]
+--   let pc = case ci of
+--              CCons   cons   -> noneOf v dv cons
+--              CConstr constr -> [tneg (constr (tvar dv))]
+  return $ declConsts smtInfo cidcs ++ [assertConstr smtInfo pcs ci dv v]
 
 --- Get variable indices for arguments of concolically tested expression
 getSMTArgs :: SymNode -> AExpSubst -> [VarIndex]

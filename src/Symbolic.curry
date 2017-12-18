@@ -2,7 +2,7 @@
 --- This module provides data structures for tracing symbolic information.
 ---
 --- @author  Jan Tikovsky
---- @version November 2017
+--- @version December 2017
 --- ----------------------------------------------------------------------------
 module Symbolic where
 
@@ -40,7 +40,15 @@ soType (SymLit   _ l) = case l of
 
 --- Literal constraint
 data LConstr = E | NE | L | LE | G | GE
- deriving (Eq, Ord, Show)
+ deriving (Eq, Ord)
+
+instance Show LConstr where
+  show E  = "=%"
+  show NE = "/=%"
+  show L  = "<%"
+  show LE = "<=%"
+  show G  = ">%"
+  show GE = ">=%"
 
 --- Negate a literal constraint
 lcNeg :: LConstr -> LConstr
@@ -180,18 +188,24 @@ rnmTrace sargs ds (ts, v) =
 --- Nodes of symbolic execution tree
 --- ----------------------------------------------------------------------------
 
+--- Representation of path constraints, i.e.
+---   * decision variable
+---   * symbolic object
+---   * argument variables
+type PathConstr = (VarIndex, SymObj, [VarIndex])
+
 --- A symbolic node includes the following information:
 ---   * the depth of the node in the execution tree,
 ---   * the context of the node, i.e. its case id and preceeding case ids,
 ---   * indices of SMT-LIB constants which are required for the SMT-LIB model
----   * possible path constraints (in SMT-LIB representation) and
+---   * possible path constraints and
 ---   * the decision variables introduced up to this node
 ---   * the decision variable of this node
 data SymNode = SymNode
   { depth     :: Depth
   , context   :: Context
   , constants :: [VarIndex]
-  , pcs       :: [Term]
+  , pcs       :: [PathConstr]
   , dvars     :: [VarIndex]
   , dvar      :: VarIndex
   }
@@ -202,3 +216,29 @@ type Depth = Int
 
 --- A context is a case identifier followed by a sequence of preceeding case identifiers
 type Context = [VarIndex]
+
+--- ----------------------------------------------------------------------------
+--- Coverage information
+--- ----------------------------------------------------------------------------
+
+--- Coverage information for case expressions
+---   * ids of uncovered branches
+---   * information on already covered constructors / literal constraints
+data CoverInfo = CoverInfo
+  { uncovered :: [Int]
+  , coveredCs :: CoveredCs
+  }
+  deriving Show
+
+--- Covered constructors / literal constraints
+data CoveredCs = CCons   [(SymObj, [VarIndex])]
+               | CConstr LConstr Literal
+
+--- Create information on covered constructors / constraint
+mkCoveredCs :: SymObj -> [VarIndex] -> CoveredCs
+mkCoveredCs sobj@(SymCons qn _) args = CCons [(sobj, args)]
+mkCoveredCs (SymLit       lc l) _    = CConstr lc l
+
+instance Show CoveredCs where
+  show (CCons     cs) = show cs
+  show (CConstr lc l) = show lc ++ show l

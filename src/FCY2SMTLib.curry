@@ -6,7 +6,7 @@
 --- versa.
 ---
 --- @author  Jan Tikovsky
---- @version October 2017
+--- @version December 2017
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
@@ -25,7 +25,9 @@ import           Language.SMTLIB.Goodies
 import           Language.SMTLIB.Pretty
 import qualified Language.SMTLIB.Types as SMT
 import           Substitution
-import           Symbolic                     (SymObj (..), prelSymCons)
+import           Symbolic                     ( CoveredCs (..), LConstr (..)
+                                              , PathConstr, SymObj (..)
+                                              , prelSymCons)
 import           Utils                        ((<$>), foldM, mapFst, mapM, ppFM)
 
 --- Bidirectional constructor map
@@ -109,6 +111,31 @@ declConsts :: SMTInfo -> [VarIndex] -> [SMT.Command]
 declConsts smtInfo vs = map (uncurry declConst) $ fmToList
                       $ filterFM (\v _ -> v `elem` vs) (smtVars smtInfo)
 
+--- Generate SMT-LIB assertions for the given path constraints
+assertConstr :: SMTInfo -> [PathConstr] -> CoveredCs -> VarIndex -> VarIndex
+             -> SMT.Command
+assertConstr smtInfo pcs cc dv vi = assert $ map (pc2SMT smtInfo) pcs ++ npc
+  where
+  -- negated path constraint
+  npc = case cc of
+    CConstr lc l -> [tneg $ pc2SMT smtInfo (dv, SymLit lc l, [])]
+    CCons     cs -> snd $ foldr diffThan (vi, []) cs
+      where
+      diffThan :: (SymObj, [VarIndex]) -> (VarIndex, [SMT.Term]) -> (VarIndex, [SMT.Term])
+      diffThan (sobj, args) (i, ineqs) =
+        let ss = map (getSMTSort smtInfo) args
+            vn = i - length ss
+            vs = [i, i - 1 .. vn + 1]
+        in (vn, forAll vs ss (tvar dv /=% qtcomb (cons2SMT smtInfo sobj dv)
+                                                 (map tvar vs)) : ineqs)
+
+--- Transform path constraints to SMT-LIB constraints
+pc2SMT :: SMTInfo -> PathConstr -> SMT.Term
+pc2SMT smtInfo pc = case pc of
+  (v, tqn@(SymCons _ _), args) -> tvar v =% qtcomb (cons2SMT smtInfo tqn v)
+                                              (map tvar args)
+  (v, SymLit lc l      ,    _) -> (lc2SMT lc) (tvar v) (lit2SMT l)
+
 data SMTInfo = SMTInfo
   { smtDecls :: [SMT.Command]
   , smtVars  :: TypeEnv
@@ -185,8 +212,8 @@ getFCYType vi smtInfo = case lookupFM (smtVars smtInfo) vi of
   Just ti -> fcType ti
 
 --- Get SMT-LIB sort information for the given SMT-LIB variable
-getSMTSort :: VarIndex -> SMTInfo -> SMT.Sort
-getSMTSort vi smtInfo = case lookupFM (smtVars smtInfo) vi of
+getSMTSort :: SMTInfo -> VarIndex -> SMT.Sort
+getSMTSort smtInfo vi = case lookupFM (smtVars smtInfo) vi of
   Nothing -> error $ "FCY2SMT.getSMTSort: unbound variable " ++ show vi
   Just ti -> smtSort ti
 
@@ -247,31 +274,27 @@ ty2SMT (FuncType     ty1 ty2) = SMT.SComb "Func" <$> mapM ty2SMT [ty1, ty2]
 ty2SMT (TCons qn@(_, tc) tys) =
   SMT.SComb (lookupWithDefaultBM tc qn predefTypes) <$> mapM ty2SMT tys
 
---- Transform a FlatCurry constructor or literal to SMT-LIB
+--- Transform a FlatCurry constructor to an SMT-LIB identifier
 cons2SMT :: SMTInfo -> SymObj -> VarIndex -> SMT.QIdent
-cons2SMT smtInfo tqn@(SymCons qn _) v = case lookupSMTCons tqn smtInfo of
+cons2SMT smtInfo tqn v = case lookupSMTCons tqn smtInfo of
   Nothing -> error $ "FCY2SMTLib.cons2SMT: No SMT-LIB representation for "
-               ++ show qn
-  Just c  -> SMT.As c (getSMTSort v smtInfo)
-cons2SMT _ (SymLit _ _) _ = error $ "FCY2SMTLib.cons2SMT: symbolic literal"
+               ++ show tqn
+  Just c  -> SMT.As c (getSMTSort smtInfo v)
+
+--- Transform a literal constraint to SMT-LIB
+lc2SMT :: LConstr -> SMT.Term -> SMT.Term -> SMT.Term
+lc2SMT E  = (=%)
+lc2SMT NE = (/=%)
+lc2SMT L  = (<%)
+lc2SMT LE = (<=%)
+lc2SMT G  = (>%)
+lc2SMT GE = (>=%)
 
 --- Transform a FlatCurry literal to SMT-LIB
 lit2SMT :: Literal -> SMT.Term
 lit2SMT (Intc   i) = tint   i
 lit2SMT (Floatc f) = tfloat f
 lit2SMT (Charc  _) = error "SMTLib.Goodies.lit2SMT: Characters are not supported"
-
---- Transform a constructor expression into an SMTLib term
--- toTerm :: SMTInfo -> SymCons -> [VarIndex] -> SMT.Term
--- toTerm smtInfo tqn@(SymCons qn ty) vs = case lookupSMTCons tqn smtInfo of
---   Nothing -> error $ "FCY2SMTLib.toTerm: No SMT-LIB representation for "
---                ++ show qn
---   Just c  -> qtcomb c (toSort smtInfo (resultType ty)) (map tvar vs)
--- toTerm _ (SymLit l) [] = case l of
---   Intc   i -> tint   i
---   Floatc f -> tfloat f
---   Charc  _ -> error "FCY2SMTLib.toTerm: Characters are currently not supported"
-
 
 --- Transform an SMT-LIB term into a FlatCurry expression
 fromTerm :: SMTInfo -> VarIndex -> SMT.Term -> AExpr TypeAnn
