@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "author": "Jan Rasmus Tikovsky <jrt@informatik.uni-kiel.de>",
   "synopsis": "Curry Concolic Testing Interpreter",
-  "category": [ "Programming" ],
+  "category": [ "Testing" ],
   "license": "BSD-3-Clause",
   "licenseFile": "LICENSE",
   "description": "This package provides a tool for the automatic generation of test cases for Curry programs via concolic testing.",
