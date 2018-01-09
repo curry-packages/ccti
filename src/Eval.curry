@@ -676,7 +676,7 @@ ceBuiltinI2F :: AExpr TypeAnn -> CEM (AExpr TypeAnn)
 ceBuiltinI2F e = do
   v <- hnf e
   case v of
-    ALit _ (Intc l) -> return (toFCY (fromInteger l))
+    ALit _ (Intc l) -> return (toFCY (fromInt l))
     _               -> ceBuiltinI2F v
 
 --- Concolic evaluation of `(&&)`
