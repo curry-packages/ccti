@@ -2,7 +2,7 @@
 --- This module provides some utility operations.
 ---
 --- @author  Jan Tikovsky
---- @version December 2017
+--- @version January 2018
 --- ----------------------------------------------------------------------------
 module Utils where
 
@@ -15,30 +15,8 @@ import Text.Pretty
 infixl 4 <$>, <*>
 
 -- TODO: Remove when there are corresponding functions in the libraries
-sequence :: Monad m => [m a] -> m [a]
-sequence = foldr (\m n -> m >>= \x -> n >>= \xs -> return (x:xs)) (return [])
-
-sequence_ :: Monad m => [m a] -> m ()
-sequence_ = foldr (>>) (return ())
-
-mapM :: Monad m => (a -> m b) -> [a] -> m [b]
-mapM f = sequence . map f
-
-mapM_ :: Monad m => (a -> m b) -> [a] -> m ()
-mapM_ f = sequence_ . map f
-
-foldM :: Monad m => (a -> b -> m a) -> a -> [b] -> m a
-foldM _ z []     = return z
-foldM f z (x:xs) = f z x >>= \z' -> foldM f z' xs
-
 zipWithM_ :: Monad m => (a -> b -> m c) -> [a] -> [b] -> m ()
 zipWithM_ f xs ys = sequence_ $ zipWith f xs ys
-
-whenM :: Monad m => Bool -> m () -> m ()
-whenM p a = if p then a else return ()
-
-unlessM :: Monad m => Bool -> m () -> m ()
-unlessM p = whenM (not p)
 
 --- Apply a pure function to the result of a monadic action.
 (<$>) :: Monad m => (a -> b) -> m a -> m b

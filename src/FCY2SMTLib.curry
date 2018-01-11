@@ -28,7 +28,7 @@ import           Substitution
 import           Symbolic                     ( CoveredCs (..), LConstr (..)
                                               , PathConstr, SymObj (..)
                                               , prelSymCons)
-import           Utils                        ((<$>), foldM, mapFst, mapM, ppFM)
+import           Utils                        ((<$>), mapFst, ppFM)
 
 --- Bidirectional constructor map
 --- mapping FlatCurry constructors to SMTLib constructors and vice versa

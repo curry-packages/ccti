@@ -33,7 +33,7 @@ import FlatCurry.Annotated.Types
 -- import FlatCurry.Annotated.Goodies (annExpr, combArgs, updCombs)
 
 import FlatCurryGoodies (IDAnn, extendAnn)
-import Utils ((<$>), (<*>), mapM)
+import Utils ((<$>), (<*>))
 
 --- Identify Cases Monad
 data ICM a = IC { runICM :: VarIndex -> (a, VarIndex) }

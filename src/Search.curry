@@ -37,7 +37,7 @@ import Solver.SMTLIB.Z3 ( SMTError (..), SMTOpts (..), SMTSess, defSMTOpts
 
 import Substitution (AExpSubst, compose, dom, mkSubst, restrict, subst)
 import Symbolic
-import Utils        (fst3, mapM_, unlessM, ppFM, whenM)
+import Utils        (fst3, ppFM)
 
 --- Map of unvisited symbolic nodes, i.e. case branches
 type CoverMap = ContextMap Context CoverInfo
