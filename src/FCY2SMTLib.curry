@@ -6,7 +6,7 @@
 --- versa.
 ---
 --- @author  Jan Tikovsky
---- @version December 2017
+--- @version January 2018
 --- ----------------------------------------------------------------------------
 module FCY2SMTLib where
 
@@ -118,7 +118,7 @@ assertConstr smtInfo pcs cc dv vi = assert $ map (pc2SMT smtInfo) pcs ++ npc
   where
   -- negated path constraint
   npc = case cc of
-    CConstr lc l -> [tneg $ pc2SMT smtInfo (dv, SymLit lc l, [])]
+    CConstr lc l -> [tnot $ pc2SMT smtInfo (dv, SymLit lc l, [])]
     CCons     cs -> snd $ foldr diffThan (vi, []) cs
       where
       diffThan :: (SymObj, [VarIndex]) -> (VarIndex, [SMT.Term]) -> (VarIndex, [SMT.Term])
