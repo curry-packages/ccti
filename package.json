@@ -24,7 +24,7 @@
     "main": "ccti"
   },
   "source": {
-    "git": "https://git.informatik.uni-kiel.de/jrt/ccti.git",
+    "git": "https://git.ps.informatik.uni-kiel.de/curry-packages/ccti.git",
     "tag": "$version"
   }
 }
