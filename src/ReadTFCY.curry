@@ -7,16 +7,16 @@
 module ReadTFCY where
 
 import Directory    (doesFileExist)
-import Distribution ( FrontendParams, FrontendTarget (TFCY), addTarget
-                    , callFrontendWithParams, defaultParams
-                    , getLoadPathForModule, inCurrySubdir
-                    , lookupModuleSourceInLoadPath, setQuiet, stripCurrySuffix
+import Distribution ( getLoadPathForModule, inCurrySubdir
+                    , lookupModuleSourceInLoadPath, stripCurrySuffix
                     )
 import FileGoodies  (getFileInPath)
 import FilePath     ((<.>), (</>), takeFileName)
 import ReadShowTerm (readUnqualifiedTerm)
 
 import FlatCurry.Annotated.Types
+import System.FrontendExec ( FrontendParams, FrontendTarget (TFCY), addTarget
+                           , callFrontendWithParams, defaultParams, setQuiet )
 
 --- Parse a Curry program and return corresponding TypedFlatCurry program
 readTFCY :: String -> IO (AProg TypeExpr)

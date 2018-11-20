@@ -1,9 +1,6 @@
 module ccti (main) where
 
-import Distribution               ( FrontendParams, FrontendTarget (TFCY)
-                                  , callFrontendWithParams
-                                  , rcParams, setFullPath, sysLibPath
-                                  )
+import Distribution               ( sysLibPath )
 import FilePath                   (takeDirectory)
 import FlatCurry.Annotated.Pretty (ppFuncDecls)
 import FlatCurry.Annotated.Types
@@ -20,6 +17,9 @@ import Output              (debug, status)
 import ReadTFCY
 import Search              (csearch, ppTestCase)
 import Utils               (inDirectory)
+
+import System.FrontendExec ( FrontendParams, FrontendTarget (TFCY)
+                           , callFrontendWithParams, rcParams, setFullPath )
 
 main :: IO ()
 main = do
