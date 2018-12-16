@@ -1,6 +1,5 @@
 module ccti (main) where
 
-import Distribution               ( sysLibPath )
 import FilePath                   (takeDirectory)
 import FlatCurry.Annotated.Pretty (ppFuncDecls)
 import FlatCurry.Annotated.Types
@@ -18,6 +17,7 @@ import ReadTFCY
 import Search              (csearch, ppTestCase)
 import Utils               (inDirectory)
 
+import System.CurryPath    ( sysLibPath )
 import System.FrontendExec ( FrontendParams, FrontendTarget (TFCY)
                            , callFrontendWithParams, rcParams, setFullPath )
 

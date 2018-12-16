@@ -2,19 +2,18 @@
 --- This module provides operations for reading TypedFlatCurry files.
 ---
 --- @author  Jan Tikovsky
---- @version December 2017
+--- @version December 2018
 --- ----------------------------------------------------------------------------
 module ReadTFCY where
 
 import Directory    (doesFileExist)
-import Distribution ( getLoadPathForModule, inCurrySubdir
-                    , lookupModuleSourceInLoadPath, stripCurrySuffix
-                    )
 import FileGoodies  (getFileInPath)
 import FilePath     ((<.>), (</>), takeFileName)
 import ReadShowTerm (readUnqualifiedTerm)
 
 import FlatCurry.Annotated.Types
+import System.CurryPath    ( getLoadPathForModule, inCurrySubdir
+                           , lookupModuleSourceInLoadPath, stripCurrySuffix )
 import System.FrontendExec ( FrontendParams, FrontendTarget (TFCY), addTarget
                            , callFrontendWithParams, defaultParams, setQuiet )
 

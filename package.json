@@ -9,6 +9,7 @@
   "description": "This package provides a tool for the automatic generation of test cases for Curry programs via concolic testing.",
   "dependencies": {
       "base"               : ">= 1.0.0, < 2.0.0",
+      "currypath"          : ">= 0.0.1",
       "flatcurry":           ">= 2.0.0",
       "flatcurry-annotated": ">= 2.0.0",
       "frontend-exec"      : ">= 0.0.1",
