@@ -6,7 +6,7 @@
 --- ----------------------------------------------------------------------------
 module Substitution where
 
-import FiniteMap
+import Data.FiniteMap
 import FlatCurry.Annotated.Types
 
 import FlatCurryGoodies          (TypeAnn)

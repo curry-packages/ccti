@@ -8,7 +8,7 @@
 module Eval where
 
 -- TODO: remove
-import FiniteMap (filterFM, maxFM)
+import Data.FiniteMap (filterFM, maxFM)
 
 import FlatCurry.Annotated.Goodies hiding (range)
 import FlatCurry.Annotated.Pretty         (ppExp)

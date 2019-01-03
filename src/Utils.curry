@@ -7,7 +7,7 @@
 module Utils where
 
 import Directory (getCurrentDirectory, setCurrentDirectory)
-import FiniteMap
+import Data.FiniteMap
 
 import Text.Pretty
 

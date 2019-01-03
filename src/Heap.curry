@@ -7,7 +7,7 @@
 --- ----------------------------------------------------------------------------
 module Heap where
 
-import FiniteMap
+import Data.FiniteMap
 import FlatCurry.Annotated.Pretty (ppExp, ppVarIndex)
 import FlatCurry.Annotated.Types
 import Text.Pretty

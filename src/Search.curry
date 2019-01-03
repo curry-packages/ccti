@@ -6,8 +6,8 @@
 --- ----------------------------------------------------------------------------
 module Search where
 
-import FiniteMap ( FM, addListToFM, addToFM_C, delFromFM, elemFM, emptyFM
-                 , foldFM, lookupFM )
+import Data.FiniteMap ( FM, addListToFM, addToFM_C, delFromFM, elemFM, emptyFM
+                      , foldFM, lookupFM )
 
 import FlatCurry.Annotated.Goodies (argTypes)
 import FlatCurry.Annotated.Pretty  (ppExp)

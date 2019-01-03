@@ -1,6 +1,6 @@
 module Bimap where
 
-import FiniteMap
+import Data.FiniteMap
 import Text.Pretty
 
 import Utils (ppFM)

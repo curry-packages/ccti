@@ -1,6 +1,6 @@
 module Search.CaseMap where
 
-import qualified FiniteMap as FM
+import qualified Data.FiniteMap as FM
 import           List            (intersect, union)
 
 import Language.SMTLIB.Goodies   (tvar)

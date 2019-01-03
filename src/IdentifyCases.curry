@@ -27,7 +27,6 @@
 --- ----------------------------------------------------------------------------
 module IdentifyCases where
 
--- import FiniteMap
 import FCYFunctorInstances
 import FlatCurry.Annotated.Types
 -- import FlatCurry.Annotated.Goodies (annExpr, combArgs, updCombs)

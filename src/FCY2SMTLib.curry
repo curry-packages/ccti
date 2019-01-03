@@ -11,7 +11,7 @@
 module FCY2SMTLib where
 
 import Char                                   (toLower)
-import FiniteMap
+import Data.FiniteMap
 import FlatCurry.Annotated.Goodies            (argTypes, resultType)
 import FlatCurry.Annotated.Pretty             (ppQName, ppTypeExp, ppVarIndex)
 import FlatCurry.Annotated.Types
